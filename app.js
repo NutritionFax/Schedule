@@ -10,6 +10,7 @@ const makeId = () => {
 const state = loadState();
 ensureToday();
 let rolloverTimer = null;
+let countdownTimer = null;
 const draftSubtasks = [];
 
 const elements = {
@@ -28,9 +29,10 @@ const elements = {
   progressBar: $("#progressBar"),
   homeCurrentStreak: $("#homeCurrentStreak"),
   homeBestStreak: $("#homeBestStreak"),
-  weekCompletions: $("#weekCompletions"),
+  resetCountdown: $("#resetCountdown"),
   streakNote: $("#streakNote"),
   dailyNote: $("#dailyNote"),
+  dashboardPanel: $(".dashboard-panel"),
   resetTime: $("#resetTime"),
   resetNote: $("#resetNote"),
   analyticsActivity: $("#analyticsActivity"),
@@ -53,6 +55,7 @@ window.addEventListener("focus", refreshForCurrentDay);
 
 render();
 scheduleNextRollover();
+startResetCountdown();
 
 function loadState() {
   const fallback = {
@@ -170,6 +173,7 @@ function refreshForCurrentDay() {
   ensureToday();
   render();
   scheduleNextRollover();
+  startResetCountdown();
 }
 
 function handleGlobalClick(event) {
@@ -182,6 +186,7 @@ function handleGlobalClick(event) {
   const draftDelete = event.target.closest(".draft-subtask-list button");
   if (draftDelete) {
     draftSubtasks.splice(Number(draftDelete.closest("li").dataset.index), 1);
+    triggerButtonFeedback(draftDelete);
     renderDraftSubtasks();
     return;
   }
@@ -251,21 +256,28 @@ function setActiveTab(tab) {
 
 function setActivityComplete(activity, completed) {
   const date = todayKey();
+  const wasDoneForDay = isDoneForDay();
   activity.completedDates = activity.completedDates || [];
 
   if (completed && !activity.completedDates.includes(date)) {
     state.activityLabels[activity.id] = activity.title;
     activity.completedDates.push(date);
     incrementHistory(activity.id, date);
+    if (!isLastOpenActivity(activity.id)) playFeedbackTone("click");
   }
 
   if (!completed) {
     activity.completedDates = activity.completedDates.filter((item) => item !== date);
     decrementHistory(activity.id, date);
+    playFeedbackTone("click");
   }
 
   saveState();
   render();
+
+  if (!wasDoneForDay && isDoneForDay()) {
+    celebrateDailyCompletion();
+  }
 }
 
 function incrementHistory(activityId, date) {
@@ -376,7 +388,7 @@ function renderProgress() {
   const percent = total ? Math.round((complete / total) * 100) : 0;
   const activeStreak = getActiveStreak("all");
   const bestStreak = getBestStreak(getRecentDates(365), "all");
-  const weekCompletions = getRecentDates(7).reduce((sum, date) => sum + countForDate(date, "all"), 0);
+  const dayIsDone = total > 0 && complete === total;
 
   elements.progressTitle.textContent = `${complete} of ${total} complete`;
   elements.progressRing.dataset.label = `${percent}%`;
@@ -384,11 +396,13 @@ function renderProgress() {
   elements.progressBar.style.width = `${percent}%`;
   elements.homeCurrentStreak.textContent = formatDayCount(activeStreak.days);
   elements.homeBestStreak.textContent = formatDayCount(bestStreak);
-  elements.weekCompletions.textContent = weekCompletions;
+  renderResetCountdown();
   elements.streakNote.textContent = getStreakNote(activeStreak);
+  elements.dashboardPanel.classList.toggle("all-done", dayIsDone);
+  elements.dailyNote.classList.toggle("done-message", dayIsDone);
   elements.dailyNote.textContent = total
     ? complete === total
-      ? "Everything for today is checked off."
+      ? "Done for today. Everything is checked off."
       : `${total - complete} ${total - complete === 1 ? "activity" : "activities"} still open today.`
     : "Add an activity to start shaping the day.";
 }
@@ -619,6 +633,17 @@ function scheduleNextRollover() {
   }, Math.max(1000, delay));
 }
 
+function startResetCountdown() {
+  window.clearInterval(countdownTimer);
+  renderResetCountdown();
+  countdownTimer = window.setInterval(renderResetCountdown, 1000);
+}
+
+function renderResetCountdown() {
+  if (!elements.resetCountdown) return;
+  elements.resetCountdown.textContent = formatTimeLeft(getNextResetAt().getTime() - Date.now());
+}
+
 function formatResetDate(date) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -632,6 +657,16 @@ function formatDayCount(days) {
   return `${days} ${days === 1 ? "day" : "days"}`;
 }
 
+function formatTimeLeft(milliseconds) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
 function getStreakNote(streak) {
   if (streak.hasToday) return "Active today";
   if (streak.days > 0) return "Complete one today";
@@ -640,6 +675,16 @@ function getStreakNote(streak) {
 
 function isCompletedToday(activity) {
   return (activity.completedDates || []).includes(todayKey());
+}
+
+function isDoneForDay() {
+  return state.activities.length > 0 && state.activities.every(isCompletedToday);
+}
+
+function isLastOpenActivity(activityId) {
+  return state.activities
+    .filter((activity) => activity.id !== activityId)
+    .every(isCompletedToday);
 }
 
 function normalizeUrl(url) {
@@ -655,4 +700,69 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
+}
+
+document.addEventListener("pointerdown", (event) => {
+  const button = event.target.closest("button");
+  if (button) triggerButtonFeedback(button);
+});
+
+function triggerButtonFeedback(button) {
+  button.classList.remove("clicked");
+  window.requestAnimationFrame(() => button.classList.add("clicked"));
+  window.setTimeout(() => button.classList.remove("clicked"), 260);
+}
+
+function celebrateDailyCompletion() {
+  playFeedbackTone("complete");
+  elements.dashboardPanel.classList.add("celebrating");
+  window.setTimeout(() => elements.dashboardPanel.classList.remove("celebrating"), 1000);
+
+  const burst = document.createElement("div");
+  burst.className = "confetti-burst";
+
+  for (let index = 0; index < 34; index += 1) {
+    const piece = document.createElement("span");
+    piece.style.setProperty("--x", `${Math.random() * 100}vw`);
+    piece.style.setProperty("--delay", `${Math.random() * 0.18}s`);
+    piece.style.setProperty("--spin", `${Math.random() * 520 - 260}deg`);
+    piece.style.setProperty("--color", getConfettiColor(index));
+    burst.append(piece);
+  }
+
+  document.body.append(burst);
+  window.setTimeout(() => burst.remove(), 1700);
+}
+
+function getConfettiColor(index) {
+  return ["#236851", "#315f96", "#d39d3f", "#b84c3f", "#6f7f72"][index % 5];
+}
+
+function playFeedbackTone(type) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+
+  const context = new AudioContext();
+  const first = type === "complete" ? 660 : 440;
+  const second = type === "complete" ? 880 : 520;
+  playTone(context, first, 0, 0.055);
+  playTone(context, second, 0.06, 0.08);
+  window.setTimeout(() => context.close(), 240);
+}
+
+function playTone(context, frequency, delay, duration) {
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const start = context.currentTime + delay;
+  const end = start + duration;
+
+  oscillator.type = "sine";
+  oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(0.04, start + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(start);
+  oscillator.stop(end + 0.02);
 }

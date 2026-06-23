@@ -8,7 +8,10 @@
   --accent: #236851;
   --accent-2: #b84c3f;
   --accent-3: #315f96;
+  --gold: #d39d3f;
   --soft: #e8f1ed;
+  --done-soft: #e8f5ee;
+  --done-line: #9bc7ad;
   --shadow: 0 14px 34px rgba(26, 39, 34, 0.08);
   --shadow-soft: 0 8px 18px rgba(26, 39, 34, 0.06);
 }
@@ -34,6 +37,12 @@ textarea {
 
 button {
   cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+button:active,
+button.clicked {
+  transform: translateY(1px) scale(0.98);
 }
 
 .app-shell {
@@ -112,6 +121,14 @@ h3 {
   background: var(--panel);
   color: var(--ink);
   box-shadow: var(--shadow-soft);
+}
+
+.tab-button.clicked,
+.icon-button.clicked,
+.draft-subtask-list button.clicked,
+.task-list button.clicked {
+  background: #e5eee9;
+  border-color: var(--accent);
 }
 
 .view {
@@ -206,6 +223,19 @@ select:focus {
   font-weight: 900;
 }
 
+.primary-button:hover,
+.task-form button:hover,
+.subtask-input-row button:hover {
+  background: #1d5845;
+}
+
+.primary-button.clicked,
+.task-form button.clicked,
+.subtask-input-row button.clicked {
+  background: #174a3a;
+  box-shadow: 0 0 0 4px rgba(35, 104, 81, 0.16);
+}
+
 .subtask-input-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -258,6 +288,19 @@ select:focus {
   align-content: start;
   gap: 18px;
   padding: 22px;
+  position: relative;
+  overflow: hidden;
+  transition: background-color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.dashboard-panel.all-done {
+  border-color: var(--done-line);
+  background: linear-gradient(180deg, #ffffff 0%, var(--done-soft) 100%);
+  box-shadow: 0 18px 42px rgba(35, 104, 81, 0.14);
+}
+
+.dashboard-panel.celebrating {
+  animation: celebrationPulse 900ms ease;
 }
 
 .panel-heading {
@@ -327,6 +370,12 @@ select:focus {
   border-radius: 8px;
   background: #fbfcfb;
   padding: 14px;
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+.dashboard-panel.all-done .dashboard-stats article {
+  border-color: var(--done-line);
+  background: #f6fbf8;
 }
 
 .dashboard-stats span,
@@ -345,6 +394,15 @@ select:focus {
 .quiet {
   color: var(--muted);
   line-height: 1.5;
+}
+
+.done-message {
+  border: 1px solid var(--done-line);
+  border-radius: 8px;
+  background: #f3fbf6;
+  color: #1f5e49;
+  font-weight: 850;
+  padding: 12px 14px;
 }
 
 .reset-control {
@@ -366,11 +424,13 @@ select:focus {
   background: var(--panel);
   padding: 16px;
   box-shadow: var(--shadow-soft);
+  transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
 .activity-card.completed {
   border-color: rgba(37, 109, 90, 0.45);
   background: #f7fbf9;
+  box-shadow: 0 10px 28px rgba(35, 104, 81, 0.12);
 }
 
 .activity-card-main {
@@ -437,6 +497,7 @@ select:focus {
 
 .icon-button:hover {
   border-color: var(--accent);
+  background: #f3f8f5;
 }
 
 .delete-activity {
@@ -560,6 +621,66 @@ canvas {
 
 .stats-grid strong {
   font-size: 1.6rem;
+}
+
+.confetti-burst {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+  overflow: hidden;
+}
+
+.confetti-burst span {
+  position: absolute;
+  top: -16px;
+  left: var(--x);
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--color);
+  animation: confettiFall 1500ms cubic-bezier(0.16, 0.8, 0.32, 1) var(--delay) forwards;
+}
+
+@keyframes confettiFall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -20px, 0) rotate(0deg);
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 105vh, 0) rotate(var(--spin));
+  }
+}
+
+@keyframes celebrationPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  35% {
+    transform: scale(1.01);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  .confetti-burst {
+    display: none;
+  }
 }
 
 @media (max-width: 820px) {
