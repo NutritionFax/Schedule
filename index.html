@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Daily Activities</title>
+    <meta name="theme-color" content="#236851">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Activities">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Daily focus</p>
+          <h1>Activities</h1>
+        </div>
+        <div class="date-chip" id="todayLabel"></div>
+      </header>
+
+      <nav class="tabs" aria-label="Main views">
+        <button class="tab-button active" type="button" data-tab="today">Today</button>
+        <button class="tab-button" type="button" data-tab="analytics">Analytics</button>
+      </nav>
+
+      <section class="view active" id="todayView" aria-labelledby="todayTab">
+        <div class="today-grid">
+          <form class="activity-form" id="activityForm">
+            <h2>Add Activity</h2>
+            <label>
+              <span>Activity</span>
+              <input id="activityTitle" name="title" type="text" placeholder="Deep work, workout, reading..." required>
+            </label>
+            <label>
+              <span>Optional link</span>
+              <input id="activityLink" name="link" type="text" inputmode="url" placeholder="https://...">
+            </label>
+            <div class="subtask-builder">
+              <span class="field-label">Subtasks</span>
+              <div class="subtask-input-row">
+                <input id="initialSubtaskInput" type="text" placeholder="Subtask" aria-label="Subtask">
+                <button id="addInitialSubtask" type="button">Add</button>
+              </div>
+              <ul class="draft-subtask-list" id="initialSubtaskList" aria-label="Subtasks to add"></ul>
+            </div>
+            <label class="check-row">
+              <input id="activityRepeats" name="repeats" type="checkbox" checked>
+              <span>Repeat this activity every day</span>
+            </label>
+            <button class="primary-button" type="submit">Add activity</button>
+          </form>
+
+          <section class="dashboard-panel" aria-label="Daily progress">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Progress</p>
+                <h2 id="progressTitle">0 of 0 complete</h2>
+              </div>
+              <div class="progress-ring" id="progressRing" aria-hidden="true"></div>
+            </div>
+            <div class="meter" aria-hidden="true">
+              <div id="progressBar"></div>
+            </div>
+            <div class="dashboard-stats" aria-label="Daily statistics">
+              <article>
+                <span>Streak</span>
+                <strong id="homeCurrentStreak">0 days</strong>
+                <small id="streakNote">Complete one to start.</small>
+              </article>
+              <article>
+                <span>Best</span>
+                <strong id="homeBestStreak">0 days</strong>
+                <small>Last 365 days</small>
+              </article>
+              <article>
+                <span>This week</span>
+                <strong id="weekCompletions">0</strong>
+                <small>Completions</small>
+              </article>
+            </div>
+            <p class="quiet" id="dailyNote">Add an activity to start shaping the day.</p>
+            <div class="reset-control">
+              <label>
+                <span>Day resets at</span>
+                <input id="resetTime" type="time" value="00:00">
+              </label>
+              <p class="quiet" id="resetNote"></p>
+            </div>
+          </section>
+        </div>
+
+        <section class="activity-list" id="activityList" aria-label="Activity list"></section>
+      </section>
+
+      <section class="view" id="analyticsView" aria-label="Analytics">
+        <div class="analytics-toolbar">
+          <div>
+            <p class="eyebrow">Completion history</p>
+            <h2>Progress Analytics</h2>
+          </div>
+          <div class="control-row">
+            <label>
+              <span>Activity</span>
+              <select id="analyticsActivity"></select>
+            </label>
+            <label>
+              <span>Range</span>
+              <select id="analyticsRange">
+                <option value="7">Week</option>
+                <option value="30">Month</option>
+                <option value="90">90 days</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="analytics-layout">
+          <section class="chart-panel" aria-label="Activity completion chart">
+            <canvas id="completionChart" width="900" height="420"></canvas>
+          </section>
+
+          <section class="stats-grid" aria-label="Progress statistics">
+            <article>
+              <span>Total completions</span>
+              <strong id="totalCompletions">0</strong>
+            </article>
+            <article>
+              <span>Best streak</span>
+              <strong id="bestStreak">0 days</strong>
+            </article>
+            <article>
+              <span>Current streak</span>
+              <strong id="currentStreak">0 days</strong>
+            </article>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <template id="activityTemplate">
+      <article class="activity-card">
+        <div class="activity-card-main">
+          <label class="activity-check">
+            <input class="complete-activity" type="checkbox">
+            <span></span>
+          </label>
+          <div class="activity-meta">
+            <h3></h3>
+            <a class="activity-link" target="_blank" rel="noreferrer"></a>
+            <p class="repeat-label"></p>
+          </div>
+        </div>
+        <div class="activity-actions">
+          <button class="icon-button add-task" type="button" title="Add subtask" aria-label="Add subtask">+</button>
+          <button class="icon-button delete-activity" type="button" title="Delete activity" aria-label="Delete activity">x</button>
+        </div>
+        <form class="task-form">
+          <input type="text" placeholder="New subtask" aria-label="New subtask">
+          <button type="submit">Add</button>
+        </form>
+        <ul class="task-list"></ul>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
