@@ -16,8 +16,14 @@ const draftSubtasks = [];
 const elements = {
   todayLabel: $("#todayLabel"),
   openAddMenu: $("#openAddMenu"),
+  openSettings: $("#openSettings"),
   addDialog: $("#addDialog"),
   closeAddDialog: $("#closeAddDialog"),
+  settingsDialog: $("#settingsDialog"),
+  closeSettingsDialog: $("#closeSettingsDialog"),
+  themeButtons: document.querySelectorAll("[data-theme]"),
+  resetStats: $("#resetStats"),
+  deleteAllActivities: $("#deleteAllActivities"),
   activityForm: $("#activityForm"),
   categoryForm: $("#categoryForm"),
   categoryTitle: $("#categoryTitle"),
@@ -59,8 +65,14 @@ document.addEventListener("pointerdown", (event) => {
 elements.activityForm.addEventListener("submit", addActivity);
 elements.categoryForm.addEventListener("submit", addCategory);
 elements.openAddMenu.addEventListener("click", () => openAddDialog("activity"));
+elements.openSettings.addEventListener("click", openSettingsDialog);
 elements.closeAddDialog.addEventListener("click", closeAddDialog);
 elements.addDialog.addEventListener("click", closeDialogFromBackdrop);
+elements.closeSettingsDialog.addEventListener("click", closeSettingsDialog);
+elements.settingsDialog.addEventListener("click", closeSettingsFromBackdrop);
+elements.themeButtons.forEach((button) => button.addEventListener("click", () => setTheme(button.dataset.theme)));
+elements.resetStats.addEventListener("click", resetStatistics);
+elements.deleteAllActivities.addEventListener("click", deleteAllActivities);
 elements.categoryTitle.addEventListener("keydown", handleCategoryKeydown);
 elements.addInitialSubtask.addEventListener("click", addDraftSubtask);
 elements.initialSubtaskInput.addEventListener("keydown", handleDraftSubtaskKeydown);
@@ -73,6 +85,7 @@ window.addEventListener("resize", () => {
   if ($("#analyticsView").classList.contains("active")) renderAnalytics();
 });
 
+applyTheme();
 render();
 scheduleNextRollover();
 startResetCountdown();
@@ -85,7 +98,8 @@ function loadState() {
     activityLabels: {},
     dailyProgress: {},
     settings: {
-      resetTime: DEFAULT_RESET_TIME
+      resetTime: DEFAULT_RESET_TIME,
+      theme: "system"
     },
     history: {}
   };
@@ -93,6 +107,7 @@ function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
     const settings = { ...fallback.settings, ...(saved.settings || {}) };
+    if (!["system", "light", "dark"].includes(settings.theme)) settings.theme = "system";
     const categories = normalizeCategories(saved.categories);
     const defaultCategory = categories[0];
     const activities = normalizeActivities(saved.activities, categories, defaultCategory.id);
@@ -299,6 +314,27 @@ function closeDialogFromBackdrop(event) {
   if (event.target === elements.addDialog) closeAddDialog();
 }
 
+function openSettingsDialog() {
+  renderSettings();
+  if (typeof elements.settingsDialog.showModal === "function") {
+    elements.settingsDialog.showModal();
+  } else {
+    elements.settingsDialog.setAttribute("open", "");
+  }
+}
+
+function closeSettingsDialog() {
+  if (elements.settingsDialog.open && typeof elements.settingsDialog.close === "function") {
+    elements.settingsDialog.close();
+  } else {
+    elements.settingsDialog.removeAttribute("open");
+  }
+}
+
+function closeSettingsFromBackdrop(event) {
+  if (event.target === elements.settingsDialog) closeSettingsDialog();
+}
+
 function setAddMode(mode) {
   document.querySelectorAll("[data-add-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.addMode === mode);
@@ -316,6 +352,49 @@ function updateResetTime(event) {
   render();
   scheduleNextRollover();
   startResetCountdown();
+}
+
+function setTheme(theme) {
+  state.settings.theme = ["system", "light", "dark"].includes(theme) ? theme : "system";
+  applyTheme();
+  saveState({ recordProgress: false });
+  renderSettings();
+}
+
+function applyTheme() {
+  const theme = ["system", "light", "dark"].includes(state.settings.theme) ? state.settings.theme : "system";
+  if (theme === "system") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+
+function resetStatistics() {
+  const confirmed = window.confirm("Reset all streaks and analytics history? Your categories and activities will stay.");
+  if (!confirmed) return;
+
+  state.history = {};
+  state.dailyProgress = {};
+  state.activities.forEach((activity) => {
+    activity.completedDates = [];
+  });
+  saveState({ recordProgress: false });
+  render();
+}
+
+function deleteAllActivities() {
+  const confirmed = window.confirm("Delete every activity? Categories and settings will stay, but this cannot be undone.");
+  if (!confirmed) return;
+
+  state.activities = [];
+  state.activityLabels = {};
+  state.history = {};
+  state.dailyProgress = {};
+  clearDraftSubtasks();
+  saveState({ recordProgress: false });
+  closeSettingsDialog();
+  render();
 }
 
 function toggleActivityStatus(activity) {
@@ -516,7 +595,7 @@ function render() {
   renderActivities();
   renderDraftSubtasks();
   renderProgress();
-  renderResetSettings();
+  renderSettings();
   renderAnalyticsOptions();
   renderAnalytics();
 }
@@ -549,6 +628,20 @@ function renderDraftSubtasks() {
     `;
     $("span", item).textContent = title;
     elements.initialSubtaskList.append(item);
+  });
+}
+
+function renderSettings() {
+  renderThemeSettings();
+  renderResetSettings();
+}
+
+function renderThemeSettings() {
+  const theme = ["system", "light", "dark"].includes(state.settings.theme) ? state.settings.theme : "system";
+  elements.themeButtons.forEach((button) => {
+    const active = button.dataset.theme === theme;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   });
 }
 
