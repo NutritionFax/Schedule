@@ -537,6 +537,11 @@ select:focus {
   gap: 0;
 }
 
+.category-section.collapsed .category-activities,
+.category-activities[hidden] {
+  display: none;
+}
+
 .category-section.complete-collapsed {
   opacity: 0.72;
   box-shadow: none;
@@ -751,6 +756,10 @@ select:focus {
   margin-top: 4px;
 }
 
+.activity-notes-wrap[hidden] {
+  display: none;
+}
+
 .activity-notes-wrap span {
   color: var(--muted);
   font-size: 0.76rem;
@@ -766,8 +775,27 @@ select:focus {
 
 .activity-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   justify-self: end;
+}
+
+.text-icon-button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 0 12px;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.text-icon-button:hover,
+.text-icon-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--soft);
+  color: var(--accent);
 }
 
 .icon-button {

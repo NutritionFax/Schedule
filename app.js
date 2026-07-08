@@ -14,6 +14,7 @@ let countdownTimer = null;
 const draftSubtasks = [];
 const collapsedCategories = new Set();
 const expandedCompletedCategories = new Set();
+const openActivityNotes = new Set();
 let dragState = null;
 let skipNextClick = false;
 const HOLD_TO_DRAG_MS = 280;
@@ -645,6 +646,11 @@ function handleGlobalClick(event) {
     $(".task-form input", activityCard).focus();
   }
 
+  if (event.target.closest(".toggle-notes")) {
+    toggleActivityNotes(activity.id);
+    return;
+  }
+
   if (event.target.closest(".delete-activity")) {
     deleteActivity(activity.id);
   }
@@ -783,8 +789,19 @@ function deleteActivity(activityId) {
   state.activities = state.activities.filter((item) => item.id !== activityId);
   delete state.activityLabels[activityId];
   delete state.history[activityId];
+  openActivityNotes.delete(activityId);
   if (activity) expandedCompletedCategories.delete(activity.categoryId);
   saveState();
+  render();
+}
+
+function toggleActivityNotes(activityId) {
+  if (openActivityNotes.has(activityId)) {
+    openActivityNotes.delete(activityId);
+  } else {
+    openActivityNotes.add(activityId);
+  }
+
   render();
 }
 
@@ -971,6 +988,7 @@ function createActivityCard(activity) {
   card.classList.toggle("completed", isComplete);
   card.classList.toggle("partial", progress > 0 && progress < 1);
   card.classList.toggle("inactive", !isActive);
+  card.classList.toggle("notes-open", openActivityNotes.has(activity.id));
 
   const checkbox = $(".complete-activity", card);
   checkbox.checked = isComplete;
@@ -985,6 +1003,12 @@ function createActivityCard(activity) {
   $(".repeat-label", card).textContent = `${isActive ? "Active" : "Inactive"} - ${activity.repeats ? "Repeats every day" : "Only for today"}`;
   $(".activity-progress div", card).style.width = `${percent}%`;
   $(".activity-notes", card).value = activity.notes || "";
+  $(".activity-notes-wrap", card).hidden = !openActivityNotes.has(activity.id);
+  const notesButton = $(".toggle-notes", card);
+  notesButton.textContent = activity.notes ? "Notes*" : "Notes";
+  notesButton.title = openActivityNotes.has(activity.id) ? "Hide notes" : "Show notes";
+  notesButton.setAttribute("aria-label", notesButton.title);
+  notesButton.setAttribute("aria-expanded", String(openActivityNotes.has(activity.id)));
 
   const statusToggle = $(".status-toggle", card);
   statusToggle.classList.toggle("active", isActive);
