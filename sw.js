@@ -1,4 +1,4 @@
-const CACHE_NAME = "daily-activities-v5";
+const CACHE_NAME = "daily-activities-v6";
 const APP_ASSETS = [
   "./",
   "./index.html",

@@ -12,6 +12,8 @@ ensureToday();
 let rolloverTimer = null;
 let countdownTimer = null;
 const draftSubtasks = [];
+const collapsedCategories = new Set();
+const expandedCompletedCategories = new Set();
 
 const elements = {
   todayLabel: $("#todayLabel"),
@@ -31,6 +33,7 @@ const elements = {
   activityCategory: $("#activityCategory"),
   activityTitle: $("#activityTitle"),
   activityLink: $("#activityLink"),
+  activityNotes: $("#activityNotes"),
   initialSubtaskInput: $("#initialSubtaskInput"),
   addInitialSubtask: $("#addInitialSubtask"),
   initialSubtaskList: $("#initialSubtaskList"),
@@ -57,6 +60,7 @@ const elements = {
 };
 
 document.addEventListener("click", handleGlobalClick);
+document.addEventListener("input", handleGlobalInput);
 document.addEventListener("submit", handleGlobalSubmit);
 document.addEventListener("pointerdown", (event) => {
   const button = event.target.closest("button");
@@ -153,6 +157,7 @@ function normalizeActivities(activities, categories, defaultCategoryId) {
     categoryId: categoryIds.has(activity.categoryId) ? activity.categoryId : defaultCategoryId,
     title: activity.title || "Untitled activity",
     link: activity.link || "",
+    notes: activity.notes || "",
     active: activity.active !== false,
     repeats: activity.repeats !== false,
     createdDate: activity.createdDate || todayKeySafe(),
@@ -243,6 +248,7 @@ function addActivity(event) {
     categoryId: selectedCategory,
     title,
     link: elements.activityLink.value.trim(),
+    notes: elements.activityNotes.value.trim(),
     active: true,
     repeats: elements.activityRepeats.checked,
     createdDate: todayKey(),
@@ -438,6 +444,17 @@ function handleGlobalClick(event) {
     return;
   }
 
+  const categorySection = event.target.closest(".category-section");
+  if (categorySection && event.target.closest(".toggle-category")) {
+    toggleCategoryCollapse(categorySection.dataset.id);
+    return;
+  }
+
+  if (categorySection && event.target.closest(".delete-category")) {
+    deleteCategory(categorySection.dataset.id);
+    return;
+  }
+
   const activityCard = event.target.closest(".activity-card");
   if (!activityCard) return;
 
@@ -482,6 +499,18 @@ function handleGlobalClick(event) {
     saveState();
     render();
   }
+}
+
+function handleGlobalInput(event) {
+  const notes = event.target.closest(".activity-notes");
+  if (!notes) return;
+
+  const card = event.target.closest(".activity-card");
+  const activity = state.activities.find((item) => item.id === card?.dataset.id);
+  if (!activity) return;
+
+  activity.notes = notes.value;
+  saveState({ recordProgress: false });
 }
 
 function handleGlobalSubmit(event) {
@@ -561,6 +590,7 @@ function syncActivityCompletion(activity, wasComplete) {
 
   if (!nowComplete) {
     activity.completedDates = activity.completedDates.filter((item) => item !== date);
+    expandedCompletedCategories.delete(activity.categoryId);
   }
 
   if (nowComplete && !wasComplete) incrementHistory(activity.id, date);
@@ -579,7 +609,57 @@ function decrementHistory(activityId, date) {
 }
 
 function deleteActivity(activityId) {
-  state.activities = state.activities.filter((activity) => activity.id !== activityId);
+  const activity = state.activities.find((item) => item.id === activityId);
+  state.activities = state.activities.filter((item) => item.id !== activityId);
+  delete state.activityLabels[activityId];
+  delete state.history[activityId];
+  if (activity) expandedCompletedCategories.delete(activity.categoryId);
+  saveState();
+  render();
+}
+
+function toggleCategoryCollapse(categoryId) {
+  const autoComplete = isCategoryComplete(categoryId);
+
+  if (isCategoryCollapsed(categoryId)) {
+    collapsedCategories.delete(categoryId);
+    if (autoComplete) expandedCompletedCategories.add(categoryId);
+  } else {
+    collapsedCategories.add(categoryId);
+    expandedCompletedCategories.delete(categoryId);
+  }
+
+  render();
+}
+
+function deleteCategory(categoryId) {
+  const category = getCategory(categoryId);
+  if (!category) return;
+
+  const activityCount = state.activities.filter((activity) => activity.categoryId === categoryId).length;
+  const detail = activityCount
+    ? `Delete "${category.title}" and its ${activityCount} ${activityCount === 1 ? "activity" : "activities"}? This cannot be undone.`
+    : `Delete "${category.title}"?`;
+  if (!window.confirm(detail)) return;
+
+  state.categories = state.categories.filter((item) => item.id !== categoryId);
+  const deletedActivityIds = new Set(
+    state.activities.filter((activity) => activity.categoryId === categoryId).map((activity) => activity.id)
+  );
+  state.activities = state.activities.filter((activity) => activity.categoryId !== categoryId);
+  deletedActivityIds.forEach((id) => {
+    delete state.activityLabels[id];
+    delete state.history[id];
+  });
+  const todayProgress = state.dailyProgress[todayKey()];
+  if (todayProgress?.categories) delete todayProgress.categories[categoryId];
+  collapsedCategories.delete(categoryId);
+  expandedCompletedCategories.delete(categoryId);
+
+  if (!state.categories.length) {
+    state.categories.push(createCategory("General"));
+  }
+
   saveState();
   render();
 }
@@ -656,9 +736,13 @@ function renderActivities() {
   state.categories.forEach((category) => {
     const activities = state.activities.filter((activity) => activity.categoryId === category.id);
     const activeCount = activities.filter(isActivityActive).length;
+    const complete = isCategoryComplete(category.id);
+    const collapsed = isCategoryCollapsed(category.id);
     const section = document.createElement("section");
     section.className = "category-section";
     section.dataset.id = category.id;
+    section.classList.toggle("collapsed", collapsed);
+    section.classList.toggle("complete-collapsed", collapsed && complete);
 
     const percent = getCategoryProgressPercent(category.id);
     section.innerHTML = `
@@ -667,6 +751,10 @@ function renderActivities() {
           <p class="eyebrow">Category</p>
           <h2></h2>
           <p class="category-summary"></p>
+        </div>
+        <div class="category-actions">
+          <button class="icon-button toggle-category" type="button" aria-label="Collapse category" aria-expanded="true">^</button>
+          <button class="icon-button delete-category" type="button" aria-label="Delete category" title="Delete category">x</button>
         </div>
         <div class="category-progress-wrap">
           <span class="category-progress-label"></span>
@@ -680,8 +768,14 @@ function renderActivities() {
     $(".category-summary", section).textContent = `${activeCount} active of ${activities.length} ${activities.length === 1 ? "activity" : "activities"}`;
     $(".category-progress-label", section).textContent = `${percent}% complete`;
     $(".category-meter div", section).style.width = `${percent}%`;
+    const toggle = $(".toggle-category", section);
+    toggle.textContent = collapsed ? "v" : "^";
+    toggle.title = collapsed ? "Show activities" : "Hide activities";
+    toggle.setAttribute("aria-label", toggle.title);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
 
     const list = $(".category-activities", section);
+    list.hidden = collapsed;
     if (!activities.length) {
       const empty = document.createElement("div");
       empty.className = "category-empty";
@@ -718,8 +812,9 @@ function createActivityCard(activity) {
       : `${percent}% complete`
     : "Inactive";
   $("h3", card).textContent = activity.title;
-  $(".repeat-label", card).textContent = `${isActive ? "Active" : "Inactive"} · ${activity.repeats ? "Repeats every day" : "Only for today"}`;
+  $(".repeat-label", card).textContent = `${isActive ? "Active" : "Inactive"} - ${activity.repeats ? "Repeats every day" : "Only for today"}`;
   $(".activity-progress div", card).style.width = `${percent}%`;
+  $(".activity-notes", card).value = activity.notes || "";
 
   const statusToggle = $(".status-toggle", card);
   statusToggle.classList.toggle("active", isActive);
@@ -936,6 +1031,15 @@ function isActivityComplete(activity) {
 
 function isActivityActive(activity) {
   return activity.active !== false;
+}
+
+function isCategoryComplete(categoryId) {
+  const activities = getActiveActivities(categoryId);
+  return activities.length > 0 && activities.every(isActivityComplete);
+}
+
+function isCategoryCollapsed(categoryId) {
+  return collapsedCategories.has(categoryId) || (isCategoryComplete(categoryId) && !expandedCompletedCategories.has(categoryId));
 }
 
 function isCompletedByDate(activity, date) {

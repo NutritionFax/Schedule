@@ -529,15 +529,31 @@ select:focus {
   background: color-mix(in srgb, var(--panel) 86%, transparent);
   box-shadow: var(--shadow-soft);
   padding: 18px;
+  transition: opacity 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.category-section.collapsed {
+  gap: 0;
+}
+
+.category-section.complete-collapsed {
+  opacity: 0.72;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--done-soft) 62%, var(--panel));
 }
 
 .category-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+  grid-template-columns: minmax(0, 1fr) auto minmax(150px, 220px);
   gap: 14px;
   align-items: center;
   border-bottom: 1px solid var(--line);
   padding-bottom: 14px;
+}
+
+.category-section.collapsed .category-header {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
 .category-header h2 {
@@ -549,6 +565,20 @@ select:focus {
   font-size: 0.88rem;
   font-weight: 750;
   margin-top: 4px;
+}
+
+.category-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-category {
+  color: var(--accent);
+}
+
+.delete-category {
+  color: var(--accent-2);
 }
 
 .category-progress-wrap {
@@ -699,6 +729,24 @@ select:focus {
 .repeat-label {
   color: var(--muted);
   font-size: 0.88rem;
+}
+
+.activity-notes-wrap {
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.activity-notes-wrap span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.activity-notes {
+  min-height: 74px;
+  resize: vertical;
+  background: color-mix(in srgb, var(--panel-soft) 74%, var(--panel));
 }
 
 .activity-actions {
@@ -1131,6 +1179,10 @@ canvas {
 
   .category-header {
     grid-template-columns: 1fr;
+  }
+
+  .category-actions {
+    justify-self: start;
   }
 
   .category-progress-label {
