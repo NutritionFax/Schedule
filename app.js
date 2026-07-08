@@ -14,6 +14,10 @@ let countdownTimer = null;
 const draftSubtasks = [];
 const collapsedCategories = new Set();
 const expandedCompletedCategories = new Set();
+let dragState = null;
+let skipNextClick = false;
+const HOLD_TO_DRAG_MS = 280;
+const DRAG_CANCEL_DISTANCE = 10;
 
 const elements = {
   todayLabel: $("#todayLabel"),
@@ -62,6 +66,10 @@ const elements = {
 document.addEventListener("click", handleGlobalClick);
 document.addEventListener("input", handleGlobalInput);
 document.addEventListener("submit", handleGlobalSubmit);
+document.addEventListener("pointerdown", startHoldToDrag);
+document.addEventListener("pointermove", moveHeldItem);
+document.addEventListener("pointerup", finishHeldItem);
+document.addEventListener("pointercancel", cancelHeldItem);
 document.addEventListener("pointerdown", (event) => {
   const button = event.target.closest("button");
   if (button) triggerButtonFeedback(button);
@@ -423,7 +431,169 @@ function refreshForCurrentDay() {
   startResetCountdown();
 }
 
+function startHoldToDrag(event) {
+  if (event.button !== 0 || event.pointerType === "mouse" && event.buttons !== 1) return;
+  if (event.target.closest("button, input, textarea, select, a, label, .task-list")) return;
+
+  const activityCard = event.target.closest(".activity-card");
+  const categorySection = event.target.closest(".category-section");
+  const source = activityCard || categorySection;
+  if (!source || !elements.activityList.contains(source)) return;
+
+  dragState = {
+    type: activityCard ? "activity" : "category",
+    id: source.dataset.id,
+    started: false,
+    moved: false,
+    source,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    lastX: event.clientX,
+    lastY: event.clientY,
+    timer: window.setTimeout(() => beginHeldItemDrag(), HOLD_TO_DRAG_MS)
+  };
+}
+
+function beginHeldItemDrag() {
+  if (!dragState) return;
+
+  dragState.started = true;
+  dragState.source = getDragElement(dragState.type, dragState.id);
+  dragState.source?.classList.add("dragging");
+  document.body.classList.add("is-dragging");
+  skipNextClick = true;
+}
+
+function moveHeldItem(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+
+  dragState.lastX = event.clientX;
+  dragState.lastY = event.clientY;
+
+  if (!dragState.started) {
+    const moved = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+    if (moved > DRAG_CANCEL_DISTANCE) cancelHeldItem();
+    return;
+  }
+
+  event.preventDefault();
+  dragState.moved = true;
+  const changed = dragState.type === "category"
+    ? reorderCategoryFromPoint(event.clientX, event.clientY)
+    : reorderActivityFromPoint(event.clientX, event.clientY);
+
+  if (changed) {
+    render();
+    dragState.source = getDragElement(dragState.type, dragState.id);
+    dragState.source?.classList.add("dragging");
+  }
+}
+
+function finishHeldItem(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+
+  const shouldSave = dragState.started && dragState.moved;
+  clearDragState();
+  if (shouldSave) {
+    saveState({ recordProgress: false });
+    render();
+  }
+}
+
+function cancelHeldItem() {
+  clearDragState();
+}
+
+function clearDragState() {
+  if (!dragState) return;
+
+  window.clearTimeout(dragState.timer);
+  dragState.source?.classList.remove("dragging");
+  document.body.classList.remove("is-dragging");
+  dragState = null;
+}
+
+function getDragElement(type, id) {
+  const selector = type === "category" ? ".category-section" : ".activity-card";
+  return document.querySelector(`${selector}[data-id="${CSS.escape(id)}"]`);
+}
+
+function reorderCategoryFromPoint(x, y) {
+  const target = document.elementFromPoint(x, y)?.closest(".category-section");
+  if (!target || target.dataset.id === dragState.id) return false;
+
+  const targetIndex = state.categories.findIndex((category) => category.id === target.dataset.id);
+  const currentIndex = state.categories.findIndex((category) => category.id === dragState.id);
+  if (targetIndex < 0 || currentIndex < 0) return false;
+
+  const before = y < target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+  const [category] = state.categories.splice(currentIndex, 1);
+  let insertIndex = state.categories.findIndex((item) => item.id === target.dataset.id);
+  if (!before) insertIndex += 1;
+  state.categories.splice(insertIndex, 0, category);
+  return true;
+}
+
+function reorderActivityFromPoint(x, y) {
+  const element = document.elementFromPoint(x, y);
+  const targetCard = element?.closest(".activity-card");
+  const targetCategory = element?.closest(".category-section");
+  if (!targetCategory) return false;
+
+  const activity = state.activities.find((item) => item.id === dragState.id);
+  if (!activity) return false;
+
+  const targetActivityId = targetCard?.dataset.id;
+  if (targetActivityId === dragState.id) return false;
+
+  const targetCategoryId = targetCategory.dataset.id;
+  const before = targetCard
+    ? y < targetCard.getBoundingClientRect().top + targetCard.getBoundingClientRect().height / 2
+    : false;
+
+  return moveActivity(dragState.id, targetCategoryId, targetActivityId, before);
+}
+
+function moveActivity(activityId, targetCategoryId, targetActivityId, before) {
+  const currentIndex = state.activities.findIndex((activity) => activity.id === activityId);
+  if (currentIndex < 0) return false;
+
+  const [activity] = state.activities.splice(currentIndex, 1);
+  const previousCategoryId = activity.categoryId;
+  activity.categoryId = targetCategoryId;
+
+  let insertIndex = -1;
+  if (targetActivityId) {
+    insertIndex = state.activities.findIndex((item) => item.id === targetActivityId);
+    if (insertIndex < 0) insertIndex = state.activities.length;
+    if (!before) insertIndex += 1;
+  } else {
+    insertIndex = getCategoryInsertEndIndex(targetCategoryId);
+  }
+
+  state.activities.splice(insertIndex, 0, activity);
+  expandedCompletedCategories.delete(previousCategoryId);
+  expandedCompletedCategories.delete(targetCategoryId);
+  return true;
+}
+
+function getCategoryInsertEndIndex(categoryId) {
+  let insertIndex = state.activities.length;
+  state.activities.forEach((activity, index) => {
+    if (activity.categoryId === categoryId) insertIndex = index + 1;
+  });
+  return insertIndex;
+}
+
 function handleGlobalClick(event) {
+  if (skipNextClick) {
+    skipNextClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
   const tabButton = event.target.closest(".tab-button");
   if (tabButton) {
     setActiveTab(tabButton.dataset.tab);
@@ -1039,6 +1209,7 @@ function isCategoryComplete(categoryId) {
 }
 
 function isCategoryCollapsed(categoryId) {
+  if (dragState?.started) return collapsedCategories.has(categoryId);
   return collapsedCategories.has(categoryId) || (isCategoryComplete(categoryId) && !expandedCompletedCategories.has(categoryId));
 }
 
