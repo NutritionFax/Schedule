@@ -15,10 +15,6 @@ const draftSubtasks = [];
 const collapsedCategories = new Set();
 const expandedCompletedCategories = new Set();
 const openActivityNotes = new Set();
-let dragState = null;
-let skipNextClick = false;
-const HOLD_TO_DRAG_MS = 280;
-const DRAG_CANCEL_DISTANCE = 10;
 
 const elements = {
   todayLabel: $("#todayLabel"),
@@ -67,10 +63,6 @@ const elements = {
 document.addEventListener("click", handleGlobalClick);
 document.addEventListener("input", handleGlobalInput);
 document.addEventListener("submit", handleGlobalSubmit);
-document.addEventListener("pointerdown", startHoldToDrag);
-document.addEventListener("pointermove", moveHeldItem);
-document.addEventListener("pointerup", finishHeldItem);
-document.addEventListener("pointercancel", cancelHeldItem);
 document.addEventListener("pointerdown", (event) => {
   const button = event.target.closest("button");
   if (button) triggerButtonFeedback(button);
@@ -432,169 +424,7 @@ function refreshForCurrentDay() {
   startResetCountdown();
 }
 
-function startHoldToDrag(event) {
-  if (event.button !== 0 || event.pointerType === "mouse" && event.buttons !== 1) return;
-  if (event.target.closest("button, input, textarea, select, a, label, .task-list")) return;
-
-  const activityCard = event.target.closest(".activity-card");
-  const categorySection = event.target.closest(".category-section");
-  const source = activityCard || categorySection;
-  if (!source || !elements.activityList.contains(source)) return;
-
-  dragState = {
-    type: activityCard ? "activity" : "category",
-    id: source.dataset.id,
-    started: false,
-    moved: false,
-    source,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    lastX: event.clientX,
-    lastY: event.clientY,
-    timer: window.setTimeout(() => beginHeldItemDrag(), HOLD_TO_DRAG_MS)
-  };
-}
-
-function beginHeldItemDrag() {
-  if (!dragState) return;
-
-  dragState.started = true;
-  dragState.source = getDragElement(dragState.type, dragState.id);
-  dragState.source?.classList.add("dragging");
-  document.body.classList.add("is-dragging");
-  skipNextClick = true;
-}
-
-function moveHeldItem(event) {
-  if (!dragState || event.pointerId !== dragState.pointerId) return;
-
-  dragState.lastX = event.clientX;
-  dragState.lastY = event.clientY;
-
-  if (!dragState.started) {
-    const moved = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
-    if (moved > DRAG_CANCEL_DISTANCE) cancelHeldItem();
-    return;
-  }
-
-  event.preventDefault();
-  dragState.moved = true;
-  const changed = dragState.type === "category"
-    ? reorderCategoryFromPoint(event.clientX, event.clientY)
-    : reorderActivityFromPoint(event.clientX, event.clientY);
-
-  if (changed) {
-    render();
-    dragState.source = getDragElement(dragState.type, dragState.id);
-    dragState.source?.classList.add("dragging");
-  }
-}
-
-function finishHeldItem(event) {
-  if (!dragState || event.pointerId !== dragState.pointerId) return;
-
-  const shouldSave = dragState.started && dragState.moved;
-  clearDragState();
-  if (shouldSave) {
-    saveState({ recordProgress: false });
-    render();
-  }
-}
-
-function cancelHeldItem() {
-  clearDragState();
-}
-
-function clearDragState() {
-  if (!dragState) return;
-
-  window.clearTimeout(dragState.timer);
-  dragState.source?.classList.remove("dragging");
-  document.body.classList.remove("is-dragging");
-  dragState = null;
-}
-
-function getDragElement(type, id) {
-  const selector = type === "category" ? ".category-section" : ".activity-card";
-  return document.querySelector(`${selector}[data-id="${CSS.escape(id)}"]`);
-}
-
-function reorderCategoryFromPoint(x, y) {
-  const target = document.elementFromPoint(x, y)?.closest(".category-section");
-  if (!target || target.dataset.id === dragState.id) return false;
-
-  const targetIndex = state.categories.findIndex((category) => category.id === target.dataset.id);
-  const currentIndex = state.categories.findIndex((category) => category.id === dragState.id);
-  if (targetIndex < 0 || currentIndex < 0) return false;
-
-  const before = y < target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
-  const [category] = state.categories.splice(currentIndex, 1);
-  let insertIndex = state.categories.findIndex((item) => item.id === target.dataset.id);
-  if (!before) insertIndex += 1;
-  state.categories.splice(insertIndex, 0, category);
-  return true;
-}
-
-function reorderActivityFromPoint(x, y) {
-  const element = document.elementFromPoint(x, y);
-  const targetCard = element?.closest(".activity-card");
-  const targetCategory = element?.closest(".category-section");
-  if (!targetCategory) return false;
-
-  const activity = state.activities.find((item) => item.id === dragState.id);
-  if (!activity) return false;
-
-  const targetActivityId = targetCard?.dataset.id;
-  if (targetActivityId === dragState.id) return false;
-
-  const targetCategoryId = targetCategory.dataset.id;
-  const before = targetCard
-    ? y < targetCard.getBoundingClientRect().top + targetCard.getBoundingClientRect().height / 2
-    : false;
-
-  return moveActivity(dragState.id, targetCategoryId, targetActivityId, before);
-}
-
-function moveActivity(activityId, targetCategoryId, targetActivityId, before) {
-  const currentIndex = state.activities.findIndex((activity) => activity.id === activityId);
-  if (currentIndex < 0) return false;
-
-  const [activity] = state.activities.splice(currentIndex, 1);
-  const previousCategoryId = activity.categoryId;
-  activity.categoryId = targetCategoryId;
-
-  let insertIndex = -1;
-  if (targetActivityId) {
-    insertIndex = state.activities.findIndex((item) => item.id === targetActivityId);
-    if (insertIndex < 0) insertIndex = state.activities.length;
-    if (!before) insertIndex += 1;
-  } else {
-    insertIndex = getCategoryInsertEndIndex(targetCategoryId);
-  }
-
-  state.activities.splice(insertIndex, 0, activity);
-  expandedCompletedCategories.delete(previousCategoryId);
-  expandedCompletedCategories.delete(targetCategoryId);
-  return true;
-}
-
-function getCategoryInsertEndIndex(categoryId) {
-  let insertIndex = state.activities.length;
-  state.activities.forEach((activity, index) => {
-    if (activity.categoryId === categoryId) insertIndex = index + 1;
-  });
-  return insertIndex;
-}
-
 function handleGlobalClick(event) {
-  if (skipNextClick) {
-    skipNextClick = false;
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-
   const tabButton = event.target.closest(".tab-button");
   if (tabButton) {
     setActiveTab(tabButton.dataset.tab);
@@ -616,6 +446,16 @@ function handleGlobalClick(event) {
   }
 
   const categorySection = event.target.closest(".category-section");
+  if (categorySection && event.target.closest(".move-category-up")) {
+    moveCategory(categorySection.dataset.id, -1);
+    return;
+  }
+
+  if (categorySection && event.target.closest(".move-category-down")) {
+    moveCategory(categorySection.dataset.id, 1);
+    return;
+  }
+
   if (categorySection && event.target.closest(".toggle-category")) {
     toggleCategoryCollapse(categorySection.dataset.id);
     return;
@@ -644,6 +484,16 @@ function handleGlobalClick(event) {
   if (event.target.closest(".add-task")) {
     $(".task-form", activityCard).classList.toggle("open");
     $(".task-form input", activityCard).focus();
+  }
+
+  if (event.target.closest(".move-activity-up")) {
+    moveActivityWithinCategory(activity.id, -1);
+    return;
+  }
+
+  if (event.target.closest(".move-activity-down")) {
+    moveActivityWithinCategory(activity.id, 1);
+    return;
   }
 
   if (event.target.closest(".toggle-notes")) {
@@ -795,6 +645,36 @@ function deleteActivity(activityId) {
   render();
 }
 
+function moveCategory(categoryId, direction) {
+  const index = state.categories.findIndex((category) => category.id === categoryId);
+  const targetIndex = index + direction;
+  if (index < 0 || targetIndex < 0 || targetIndex >= state.categories.length) return;
+
+  const [category] = state.categories.splice(index, 1);
+  state.categories.splice(targetIndex, 0, category);
+  saveState({ recordProgress: false });
+  render();
+}
+
+function moveActivityWithinCategory(activityId, direction) {
+  const activity = state.activities.find((item) => item.id === activityId);
+  if (!activity) return;
+
+  const categoryActivities = state.activities.filter((item) => item.categoryId === activity.categoryId);
+  const localIndex = categoryActivities.findIndex((item) => item.id === activityId);
+  const localTargetIndex = localIndex + direction;
+  if (localIndex < 0 || localTargetIndex < 0 || localTargetIndex >= categoryActivities.length) return;
+
+  const targetActivityId = categoryActivities[localTargetIndex].id;
+  const currentIndex = state.activities.findIndex((item) => item.id === activityId);
+  const [moved] = state.activities.splice(currentIndex, 1);
+  const adjustedTargetIndex = state.activities.findIndex((item) => item.id === targetActivityId);
+  state.activities.splice(direction < 0 ? adjustedTargetIndex : adjustedTargetIndex + 1, 0, moved);
+  expandedCompletedCategories.delete(activity.categoryId);
+  saveState({ recordProgress: false });
+  render();
+}
+
 function toggleActivityNotes(activityId) {
   if (openActivityNotes.has(activityId)) {
     openActivityNotes.delete(activityId);
@@ -920,7 +800,7 @@ function renderResetSettings() {
 function renderActivities() {
   elements.activityList.replaceChildren();
 
-  state.categories.forEach((category) => {
+  state.categories.forEach((category, categoryIndex) => {
     const activities = state.activities.filter((activity) => activity.categoryId === category.id);
     const activeCount = activities.filter(isActivityActive).length;
     const complete = isCategoryComplete(category.id);
@@ -940,6 +820,8 @@ function renderActivities() {
           <p class="category-summary"></p>
         </div>
         <div class="category-actions">
+          <button class="icon-button move-category-up move-button" type="button" aria-label="Move category up" title="Move category up">Up</button>
+          <button class="icon-button move-category-down move-button" type="button" aria-label="Move category down" title="Move category down">Dn</button>
           <button class="icon-button toggle-category" type="button" aria-label="Collapse category" aria-expanded="true">^</button>
           <button class="icon-button delete-category" type="button" aria-label="Delete category" title="Delete category">x</button>
         </div>
@@ -960,6 +842,8 @@ function renderActivities() {
     toggle.title = collapsed ? "Show activities" : "Hide activities";
     toggle.setAttribute("aria-label", toggle.title);
     toggle.setAttribute("aria-expanded", String(!collapsed));
+    $(".move-category-up", section).disabled = categoryIndex === 0;
+    $(".move-category-down", section).disabled = categoryIndex === state.categories.length - 1;
 
     const list = $(".category-activities", section);
     list.hidden = collapsed;
@@ -983,6 +867,8 @@ function createActivityCard(activity) {
   const percent = Math.round(progress * 100);
   const isActive = isActivityActive(activity);
   const isComplete = isActive && progress === 1;
+  const categoryActivities = state.activities.filter((item) => item.categoryId === activity.categoryId);
+  const activityIndex = categoryActivities.findIndex((item) => item.id === activity.id);
 
   card.dataset.id = activity.id;
   card.classList.toggle("completed", isComplete);
@@ -1009,6 +895,8 @@ function createActivityCard(activity) {
   notesButton.title = openActivityNotes.has(activity.id) ? "Hide notes" : "Show notes";
   notesButton.setAttribute("aria-label", notesButton.title);
   notesButton.setAttribute("aria-expanded", String(openActivityNotes.has(activity.id)));
+  $(".move-activity-up", card).disabled = activityIndex <= 0;
+  $(".move-activity-down", card).disabled = activityIndex === categoryActivities.length - 1;
 
   const statusToggle = $(".status-toggle", card);
   statusToggle.classList.toggle("active", isActive);
@@ -1233,7 +1121,6 @@ function isCategoryComplete(categoryId) {
 }
 
 function isCategoryCollapsed(categoryId) {
-  if (dragState?.started) return collapsedCategories.has(categoryId);
   return collapsedCategories.has(categoryId) || (isCategoryComplete(categoryId) && !expandedCompletedCategories.has(categoryId));
 }
 
