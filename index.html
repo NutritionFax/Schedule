@@ -19,7 +19,10 @@
           <p class="eyebrow">Daily focus</p>
           <h1>Activities</h1>
         </div>
-        <div class="date-chip" id="todayLabel"></div>
+        <div class="topbar-actions">
+          <div class="date-chip" id="todayLabel"></div>
+          <button class="add-menu-button" id="openAddMenu" type="button" aria-label="Add activity or category">+</button>
+        </div>
       </header>
 
       <nav class="tabs" aria-label="Main views">
@@ -28,81 +31,43 @@
       </nav>
 
       <section class="view active" id="todayView" aria-labelledby="todayTab">
-        <div class="today-grid">
-          <form class="activity-form" id="activityForm">
-            <div class="category-builder">
-              <label>
-                <span>New category</span>
-                <input id="categoryTitle" type="text" placeholder="Physical, learning, home..." aria-label="New category">
-              </label>
-              <button id="addCategory" class="secondary-button" type="button">Add category</button>
+        <section class="dashboard-panel" aria-label="Daily progress">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Progress</p>
+              <h2 id="progressTitle">0 of 0 complete</h2>
             </div>
-            <h2>Add Activity</h2>
+            <div class="progress-ring" id="progressRing" aria-hidden="true"></div>
+          </div>
+          <div class="meter" aria-hidden="true">
+            <div id="progressBar"></div>
+          </div>
+          <div class="dashboard-stats" aria-label="Daily statistics">
+            <article>
+              <span>Streak</span>
+              <strong id="homeCurrentStreak">0 days</strong>
+              <small id="streakNote">Complete one to start.</small>
+            </article>
+            <article>
+              <span>Best</span>
+              <strong id="homeBestStreak">0 days</strong>
+              <small>Last 365 days</small>
+            </article>
+            <article>
+              <span>Reset in</span>
+              <strong id="resetCountdown">0h 00m</strong>
+              <small>Until next day</small>
+            </article>
+          </div>
+          <p class="quiet" id="dailyNote">Add an activity to start shaping the day.</p>
+          <div class="reset-control">
             <label>
-              <span>Category</span>
-              <select id="activityCategory"></select>
+              <span>Day resets at</span>
+              <input id="resetTime" type="time" value="00:00">
             </label>
-            <label>
-              <span>Activity</span>
-              <input id="activityTitle" name="title" type="text" placeholder="Deep work, workout, reading..." required>
-            </label>
-            <label>
-              <span>Optional link</span>
-              <input id="activityLink" name="link" type="text" inputmode="url" placeholder="https://...">
-            </label>
-            <div class="subtask-builder">
-              <span class="field-label">Subtasks</span>
-              <div class="subtask-input-row">
-                <input id="initialSubtaskInput" type="text" placeholder="Subtask" aria-label="Subtask">
-                <button id="addInitialSubtask" type="button">Add</button>
-              </div>
-              <ul class="draft-subtask-list" id="initialSubtaskList" aria-label="Subtasks to add"></ul>
-            </div>
-            <label class="check-row">
-              <input id="activityRepeats" name="repeats" type="checkbox" checked>
-              <span>Repeat this activity every day</span>
-            </label>
-            <button class="primary-button" type="submit">Add activity</button>
-          </form>
-
-          <section class="dashboard-panel" aria-label="Daily progress">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">Progress</p>
-                <h2 id="progressTitle">0 of 0 complete</h2>
-              </div>
-              <div class="progress-ring" id="progressRing" aria-hidden="true"></div>
-            </div>
-            <div class="meter" aria-hidden="true">
-              <div id="progressBar"></div>
-            </div>
-            <div class="dashboard-stats" aria-label="Daily statistics">
-              <article>
-                <span>Streak</span>
-                <strong id="homeCurrentStreak">0 days</strong>
-                <small id="streakNote">Complete one to start.</small>
-              </article>
-              <article>
-                <span>Best</span>
-                <strong id="homeBestStreak">0 days</strong>
-                <small>Last 365 days</small>
-              </article>
-              <article>
-                <span>Reset in</span>
-                <strong id="resetCountdown">0h 00m</strong>
-                <small>Until next day</small>
-              </article>
-            </div>
-            <p class="quiet" id="dailyNote">Add an activity to start shaping the day.</p>
-            <div class="reset-control">
-              <label>
-                <span>Day resets at</span>
-                <input id="resetTime" type="time" value="00:00">
-              </label>
-              <p class="quiet" id="resetNote"></p>
-            </div>
-          </section>
-        </div>
+            <p class="quiet" id="resetNote"></p>
+          </div>
+        </section>
 
         <section class="activity-list" id="activityList" aria-label="Activity list"></section>
       </section>
@@ -152,6 +117,65 @@
       </section>
     </main>
 
+    <dialog class="add-dialog" id="addDialog" aria-labelledby="addDialogTitle">
+      <div class="dialog-panel">
+        <header class="dialog-header">
+          <div>
+            <p class="eyebrow">Create</p>
+            <h2 id="addDialogTitle">Add to your routine</h2>
+          </div>
+          <button class="icon-button close-dialog" id="closeAddDialog" type="button" aria-label="Close">x</button>
+        </header>
+
+        <div class="add-choice-row" aria-label="Choose what to add">
+          <button class="choice-button active" type="button" data-add-mode="activity">
+            <span>Add Activity</span>
+            <small>Place it under a category</small>
+          </button>
+          <button class="choice-button" type="button" data-add-mode="category">
+            <span>Add Category</span>
+            <small>Create an overarching label</small>
+          </button>
+        </div>
+
+        <form class="activity-form add-panel active" id="activityForm" data-add-panel="activity">
+          <label>
+            <span>Category</span>
+            <select id="activityCategory"></select>
+          </label>
+          <label>
+            <span>Activity</span>
+            <input id="activityTitle" name="title" type="text" placeholder="Workout, study, meal prep..." required>
+          </label>
+          <label>
+            <span>Optional link</span>
+            <input id="activityLink" name="link" type="text" inputmode="url" placeholder="https://...">
+          </label>
+          <div class="subtask-builder">
+            <span class="field-label">Subtasks</span>
+            <div class="subtask-input-row">
+              <input id="initialSubtaskInput" type="text" placeholder="Subtask" aria-label="Subtask">
+              <button id="addInitialSubtask" type="button">Add</button>
+            </div>
+            <ul class="draft-subtask-list" id="initialSubtaskList" aria-label="Subtasks to add"></ul>
+          </div>
+          <label class="check-row">
+            <input id="activityRepeats" name="repeats" type="checkbox" checked>
+            <span>Repeat this activity every day</span>
+          </label>
+          <button class="primary-button" type="submit">Add activity</button>
+        </form>
+
+        <form class="category-form add-panel" id="categoryForm" data-add-panel="category">
+          <label>
+            <span>Category name</span>
+            <input id="categoryTitle" type="text" placeholder="Physical, learning, home..." aria-label="New category">
+          </label>
+          <button id="addCategory" class="primary-button" type="submit">Add category</button>
+        </form>
+      </div>
+    </dialog>
+
     <template id="activityTemplate">
       <article class="activity-card">
         <div class="activity-card-main">
@@ -160,7 +184,10 @@
             <span></span>
           </label>
           <div class="activity-meta">
-            <h3></h3>
+            <div class="activity-title-row">
+              <button class="status-toggle" type="button" aria-label="Toggle activity status"></button>
+              <h3></h3>
+            </div>
             <a class="activity-link" target="_blank" rel="noreferrer"></a>
             <p class="repeat-label"></p>
           </div>

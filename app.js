@@ -15,7 +15,11 @@ const draftSubtasks = [];
 
 const elements = {
   todayLabel: $("#todayLabel"),
+  openAddMenu: $("#openAddMenu"),
+  addDialog: $("#addDialog"),
+  closeAddDialog: $("#closeAddDialog"),
   activityForm: $("#activityForm"),
+  categoryForm: $("#categoryForm"),
   categoryTitle: $("#categoryTitle"),
   addCategory: $("#addCategory"),
   activityCategory: $("#activityCategory"),
@@ -53,7 +57,10 @@ document.addEventListener("pointerdown", (event) => {
   if (button) triggerButtonFeedback(button);
 });
 elements.activityForm.addEventListener("submit", addActivity);
-elements.addCategory.addEventListener("click", addCategory);
+elements.categoryForm.addEventListener("submit", addCategory);
+elements.openAddMenu.addEventListener("click", () => openAddDialog("activity"));
+elements.closeAddDialog.addEventListener("click", closeAddDialog);
+elements.addDialog.addEventListener("click", closeDialogFromBackdrop);
 elements.categoryTitle.addEventListener("keydown", handleCategoryKeydown);
 elements.addInitialSubtask.addEventListener("click", addDraftSubtask);
 elements.initialSubtaskInput.addEventListener("keydown", handleDraftSubtaskKeydown);
@@ -131,6 +138,7 @@ function normalizeActivities(activities, categories, defaultCategoryId) {
     categoryId: categoryIds.has(activity.categoryId) ? activity.categoryId : defaultCategoryId,
     title: activity.title || "Untitled activity",
     link: activity.link || "",
+    active: activity.active !== false,
     repeats: activity.repeats !== false,
     createdDate: activity.createdDate || todayKeySafe(),
     completedDates: Array.isArray(activity.completedDates) ? activity.completedDates : [],
@@ -185,16 +193,18 @@ function ensureToday() {
   saveState();
 }
 
-function addCategory() {
+function addCategory(event) {
+  if (event) event.preventDefault();
   const title = elements.categoryTitle.value.trim();
   if (!title) return;
 
   const category = createCategory(title);
   state.categories.push(category);
-  elements.categoryTitle.value = "";
+  elements.categoryForm.reset();
   saveState();
   render();
   elements.activityCategory.value = category.id;
+  closeAddDialog();
 }
 
 function handleCategoryKeydown(event) {
@@ -218,6 +228,7 @@ function addActivity(event) {
     categoryId: selectedCategory,
     title,
     link: elements.activityLink.value.trim(),
+    active: true,
     repeats: elements.activityRepeats.checked,
     createdDate: todayKey(),
     completedDates: [],
@@ -231,6 +242,7 @@ function addActivity(event) {
   saveState();
   render();
   elements.activityCategory.value = selectedCategory;
+  closeAddDialog();
 }
 
 function addDraftSubtask() {
@@ -263,6 +275,40 @@ function clearDraftSubtasks() {
   renderDraftSubtasks();
 }
 
+function openAddDialog(mode = "activity") {
+  setAddMode(mode);
+  if (typeof elements.addDialog.showModal === "function") {
+    elements.addDialog.showModal();
+  } else {
+    elements.addDialog.setAttribute("open", "");
+  }
+
+  const focusTarget = mode === "activity" ? elements.activityTitle : elements.categoryTitle;
+  window.setTimeout(() => focusTarget.focus(), 40);
+}
+
+function closeAddDialog() {
+  if (elements.addDialog.open && typeof elements.addDialog.close === "function") {
+    elements.addDialog.close();
+  } else {
+    elements.addDialog.removeAttribute("open");
+  }
+}
+
+function closeDialogFromBackdrop(event) {
+  if (event.target === elements.addDialog) closeAddDialog();
+}
+
+function setAddMode(mode) {
+  document.querySelectorAll("[data-add-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.addMode === mode);
+  });
+
+  document.querySelectorAll("[data-add-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.addPanel === mode);
+  });
+}
+
 function updateResetTime(event) {
   state.settings.resetTime = event.target.value || DEFAULT_RESET_TIME;
   state.lastOpenedDate = todayKey();
@@ -270,6 +316,19 @@ function updateResetTime(event) {
   render();
   scheduleNextRollover();
   startResetCountdown();
+}
+
+function toggleActivityStatus(activity) {
+  const wasDoneForDay = isDoneForDay();
+  activity.active = activity.active === false;
+  saveState();
+  render();
+
+  if (!wasDoneForDay && isDoneForDay()) {
+    celebrateDailyCompletion();
+  } else {
+    playFeedbackTone("click");
+  }
 }
 
 function refreshForCurrentDay() {
@@ -286,6 +345,12 @@ function handleGlobalClick(event) {
     return;
   }
 
+  const addModeButton = event.target.closest("[data-add-mode]");
+  if (addModeButton) {
+    setAddMode(addModeButton.dataset.addMode);
+    return;
+  }
+
   const draftDelete = event.target.closest(".draft-subtask-list button");
   if (draftDelete) {
     draftSubtasks.splice(Number(draftDelete.closest("li").dataset.index), 1);
@@ -299,6 +364,11 @@ function handleGlobalClick(event) {
 
   const activity = state.activities.find((item) => item.id === activityCard.dataset.id);
   if (!activity) return;
+
+  if (event.target.closest(".status-toggle")) {
+    toggleActivityStatus(activity);
+    return;
+  }
 
   if (event.target.matches(".complete-activity")) {
     setActivityComplete(activity, event.target.checked);
@@ -367,6 +437,8 @@ function setActiveTab(tab) {
 }
 
 function setActivityComplete(activity, completed) {
+  if (!isActivityActive(activity)) return;
+
   const wasDoneForDay = isDoneForDay();
   const wasComplete = isActivityComplete(activity);
 
@@ -490,6 +562,7 @@ function renderActivities() {
 
   state.categories.forEach((category) => {
     const activities = state.activities.filter((activity) => activity.categoryId === category.id);
+    const activeCount = activities.filter(isActivityActive).length;
     const section = document.createElement("section");
     section.className = "category-section";
     section.dataset.id = category.id;
@@ -511,7 +584,7 @@ function renderActivities() {
     `;
 
     $("h2", section).textContent = category.title;
-    $(".category-summary", section).textContent = `${activities.length} ${activities.length === 1 ? "activity" : "activities"}`;
+    $(".category-summary", section).textContent = `${activeCount} active of ${activities.length} ${activities.length === 1 ? "activity" : "activities"}`;
     $(".category-progress-label", section).textContent = `${percent}% complete`;
     $(".category-meter div", section).style.width = `${percent}%`;
 
@@ -534,19 +607,32 @@ function createActivityCard(activity) {
   const card = $(".activity-card", fragment);
   const progress = getActivityProgress(activity);
   const percent = Math.round(progress * 100);
-  const isComplete = progress === 1;
+  const isActive = isActivityActive(activity);
+  const isComplete = isActive && progress === 1;
 
   card.dataset.id = activity.id;
   card.classList.toggle("completed", isComplete);
   card.classList.toggle("partial", progress > 0 && progress < 1);
+  card.classList.toggle("inactive", !isActive);
 
   const checkbox = $(".complete-activity", card);
   checkbox.checked = isComplete;
   checkbox.indeterminate = progress > 0 && progress < 1;
-  $(".activity-check span", card).textContent = isComplete ? "Done today" : `${percent}% complete`;
+  checkbox.disabled = !isActive;
+  $(".activity-check span", card).textContent = isActive
+    ? isComplete
+      ? "Done today"
+      : `${percent}% complete`
+    : "Inactive";
   $("h3", card).textContent = activity.title;
-  $(".repeat-label", card).textContent = activity.repeats ? "Repeats every day" : "Only for today";
+  $(".repeat-label", card).textContent = `${isActive ? "Active" : "Inactive"} · ${activity.repeats ? "Repeats every day" : "Only for today"}`;
   $(".activity-progress div", card).style.width = `${percent}%`;
+
+  const statusToggle = $(".status-toggle", card);
+  statusToggle.classList.toggle("active", isActive);
+  statusToggle.classList.toggle("inactive", !isActive);
+  statusToggle.title = isActive ? "Active. Click to set inactive." : "Inactive. Click to set active.";
+  statusToggle.setAttribute("aria-label", statusToggle.title);
 
   const link = $(".activity-link", card);
   if (activity.link) {
@@ -567,6 +653,7 @@ function createActivityCard(activity) {
       <button type="button" aria-label="Delete subtask">x</button>
     `;
     $("input", item).checked = task.done;
+    $("input", item).disabled = !isActive;
     $("span", item).textContent = task.title;
     taskList.append(item);
   });
@@ -594,7 +681,9 @@ function renderProgress() {
     ? dayIsDone
       ? "Done for today. Everything is checked off."
       : `${snapshot.remaining} ${snapshot.remaining === 1 ? "activity" : "activities"} still open today.`
-    : "Add an activity to start shaping the day.";
+    : state.activities.length
+      ? "No active activities today. Reactivate one when it belongs in your routine again."
+      : "Add an activity to start shaping the day.";
 }
 
 function renderAnalyticsOptions() {
@@ -617,7 +706,7 @@ function renderAnalyticsOptions() {
     const option = document.createElement("option");
     const category = getCategory(activity.categoryId);
     option.value = `activity:${activity.id}`;
-    option.textContent = `${category?.title || "Category"} / ${activity.title}`;
+    option.textContent = `${category?.title || "Category"} / ${activity.title}${isActivityActive(activity) ? "" : " (inactive)"}`;
     elements.analyticsActivity.append(option);
   });
 
@@ -705,7 +794,7 @@ function drawChart(dates, data) {
 }
 
 function getDailyProgressSnapshot() {
-  const activities = state.activities;
+  const activities = getActiveActivities();
   const categoryProgress = Object.fromEntries(
     state.categories.map((category) => [category.id, getCategoryProgressPercent(category.id)])
   );
@@ -726,13 +815,14 @@ function getDailyProgressSnapshot() {
 }
 
 function getOverallProgressPercent() {
-  if (!state.activities.length) return 0;
-  const total = state.activities.reduce((sum, activity) => sum + getActivityProgress(activity), 0);
-  return Math.round((total / state.activities.length) * 100);
+  const activities = getActiveActivities();
+  if (!activities.length) return 0;
+  const total = activities.reduce((sum, activity) => sum + getActivityProgress(activity), 0);
+  return Math.round((total / activities.length) * 100);
 }
 
 function getCategoryProgressPercent(categoryId) {
-  const activities = state.activities.filter((activity) => activity.categoryId === categoryId);
+  const activities = getActiveActivities(categoryId);
   if (!activities.length) return 0;
   const total = activities.reduce((sum, activity) => sum + getActivityProgress(activity), 0);
   return Math.round((total / activities.length) * 100);
@@ -747,7 +837,12 @@ function getActivityProgress(activity) {
 }
 
 function isActivityComplete(activity) {
+  if (!isActivityActive(activity)) return false;
   return getActivityProgress(activity) === 1;
+}
+
+function isActivityActive(activity) {
+  return activity.active !== false;
 }
 
 function isCompletedByDate(activity, date) {
@@ -755,7 +850,7 @@ function isCompletedByDate(activity, date) {
 }
 
 function isDoneForDay() {
-  return state.activities.length > 0 && getOverallProgressPercent() === 100;
+  return getActiveActivities().length > 0 && getOverallProgressPercent() === 100;
 }
 
 function progressForDate(date, selected) {
@@ -764,7 +859,11 @@ function progressForDate(date, selected) {
 
   const [type, id] = selected.split(":");
   if (type === "category") return snapshot?.categories?.[id] ?? legacyCategoryProgress(id, date);
-  if (type === "activity") return snapshot?.activities?.[id] ?? legacyActivityProgress(id, date);
+  if (type === "activity") {
+    const activity = state.activities.find((item) => item.id === id);
+    if (activity && !isActivityActive(activity)) return 0;
+    return snapshot?.activities?.[id] ?? legacyActivityProgress(id, date);
+  }
   return 0;
 }
 
@@ -773,16 +872,17 @@ function legacyActivityProgress(activityId, date) {
 }
 
 function legacyCategoryProgress(categoryId, date) {
-  const activities = state.activities.filter((activity) => activity.categoryId === categoryId);
+  const activities = getActiveActivities(categoryId);
   if (!activities.length) return 0;
   const total = activities.reduce((sum, activity) => sum + legacyActivityProgress(activity.id, date), 0);
   return Math.round(total / activities.length);
 }
 
 function legacyOverallProgress(date) {
-  if (!state.activities.length) return 0;
-  const total = state.activities.reduce((sum, activity) => sum + legacyActivityProgress(activity.id, date), 0);
-  return Math.round(total / state.activities.length);
+  const activities = getActiveActivities();
+  if (!activities.length) return 0;
+  const total = activities.reduce((sum, activity) => sum + legacyActivityProgress(activity.id, date), 0);
+  return Math.round(total / activities.length);
 }
 
 function getBestStreak(dates, selected) {
@@ -846,6 +946,12 @@ function roundRect(ctx, x, y, width, height, radius) {
 
 function getCategory(categoryId) {
   return state.categories.find((category) => category.id === categoryId);
+}
+
+function getActiveActivities(categoryId) {
+  return state.activities.filter((activity) => {
+    return isActivityActive(activity) && (!categoryId || activity.categoryId === categoryId);
+  });
 }
 
 function getRecentDates(days) {
