@@ -16,6 +16,9 @@ const draftSubtasks = [];
 const elements = {
   todayLabel: $("#todayLabel"),
   activityForm: $("#activityForm"),
+  categoryTitle: $("#categoryTitle"),
+  addCategory: $("#addCategory"),
+  activityCategory: $("#activityCategory"),
   activityTitle: $("#activityTitle"),
   activityLink: $("#activityLink"),
   initialSubtaskInput: $("#initialSubtaskInput"),
@@ -44,7 +47,14 @@ const elements = {
 };
 
 document.addEventListener("click", handleGlobalClick);
+document.addEventListener("submit", handleGlobalSubmit);
+document.addEventListener("pointerdown", (event) => {
+  const button = event.target.closest("button");
+  if (button) triggerButtonFeedback(button);
+});
 elements.activityForm.addEventListener("submit", addActivity);
+elements.addCategory.addEventListener("click", addCategory);
+elements.categoryTitle.addEventListener("keydown", handleCategoryKeydown);
 elements.addInitialSubtask.addEventListener("click", addDraftSubtask);
 elements.initialSubtaskInput.addEventListener("keydown", handleDraftSubtaskKeydown);
 elements.resetTime.addEventListener("change", updateResetTime);
@@ -52,6 +62,9 @@ elements.analyticsActivity.addEventListener("change", renderAnalytics);
 elements.analyticsRange.addEventListener("change", renderAnalytics);
 document.addEventListener("visibilitychange", refreshForCurrentDay);
 window.addEventListener("focus", refreshForCurrentDay);
+window.addEventListener("resize", () => {
+  if ($("#analyticsView").classList.contains("active")) renderAnalytics();
+});
 
 render();
 scheduleNextRollover();
@@ -60,8 +73,10 @@ startResetCountdown();
 function loadState() {
   const fallback = {
     lastOpenedDate: getDayKey(new Date(), DEFAULT_RESET_TIME),
+    categories: [],
     activities: [],
     activityLabels: {},
+    dailyProgress: {},
     settings: {
       resetTime: DEFAULT_RESET_TIME
     },
@@ -71,20 +86,87 @@ function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
     const settings = { ...fallback.settings, ...(saved.settings || {}) };
+    const categories = normalizeCategories(saved.categories);
+    const defaultCategory = categories[0];
+    const activities = normalizeActivities(saved.activities, categories, defaultCategory.id);
+
     return {
       ...fallback,
       ...saved,
+      categories,
+      activities,
       activityLabels: { ...fallback.activityLabels, ...(saved.activityLabels || {}) },
+      dailyProgress: saved.dailyProgress || {},
       settings,
+      history: saved.history || {},
       lastOpenedDate: saved.lastOpenedDate || getDayKey(new Date(), settings.resetTime)
     };
   } catch {
-    return fallback;
+    const defaultCategory = createCategory("General");
+    return { ...fallback, categories: [defaultCategory] };
   }
 }
 
-function saveState() {
+function normalizeCategories(categories) {
+  if (Array.isArray(categories) && categories.length) {
+    const normalized = categories
+      .filter((category) => category && category.title)
+      .map((category) => ({
+        id: category.id || makeId(),
+        title: category.title.trim(),
+        createdDate: category.createdDate || todayKeySafe()
+      }));
+
+    return normalized.length ? normalized : [createCategory("General")];
+  }
+
+  return [createCategory("General")];
+}
+
+function normalizeActivities(activities, categories, defaultCategoryId) {
+  const categoryIds = new Set(categories.map((category) => category.id));
+
+  return (Array.isArray(activities) ? activities : []).map((activity) => ({
+    id: activity.id || makeId(),
+    categoryId: categoryIds.has(activity.categoryId) ? activity.categoryId : defaultCategoryId,
+    title: activity.title || "Untitled activity",
+    link: activity.link || "",
+    repeats: activity.repeats !== false,
+    createdDate: activity.createdDate || todayKeySafe(),
+    completedDates: Array.isArray(activity.completedDates) ? activity.completedDates : [],
+    tasks: normalizeTasks(activity.tasks)
+  }));
+}
+
+function normalizeTasks(tasks) {
+  return (Array.isArray(tasks) ? tasks : []).map((task) => ({
+    id: task.id || makeId(),
+    title: task.title || "Untitled subtask",
+    done: Boolean(task.done)
+  }));
+}
+
+function createCategory(title) {
+  return {
+    id: makeId(),
+    title,
+    createdDate: todayKeySafe()
+  };
+}
+
+function todayKeySafe() {
+  return getDayKey(new Date(), DEFAULT_RESET_TIME);
+}
+
+function saveState(options = {}) {
+  const { recordProgress = true } = options;
+  if (recordProgress) recordDailyProgress();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function recordDailyProgress() {
+  state.dailyProgress = state.dailyProgress || {};
+  state.dailyProgress[todayKey()] = getDailyProgressSnapshot();
 }
 
 function ensureToday() {
@@ -103,18 +185,37 @@ function ensureToday() {
   saveState();
 }
 
+function addCategory() {
+  const title = elements.categoryTitle.value.trim();
+  if (!title) return;
+
+  const category = createCategory(title);
+  state.categories.push(category);
+  elements.categoryTitle.value = "";
+  saveState();
+  render();
+  elements.activityCategory.value = category.id;
+}
+
+function handleCategoryKeydown(event) {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addCategory();
+}
+
 function addActivity(event) {
   event.preventDefault();
 
   const title = elements.activityTitle.value.trim();
   if (!title) return;
-  const id = makeId();
 
-  const tasks = getDraftSubtaskTitles()
-    .map((title) => ({ id: makeId(), title, done: false }));
+  const selectedCategory = elements.activityCategory.value || state.categories[0]?.id;
+  const id = makeId();
+  const tasks = getDraftSubtaskTitles().map((title) => ({ id: makeId(), title, done: false }));
 
   state.activities.unshift({
     id,
+    categoryId: selectedCategory,
     title,
     link: elements.activityLink.value.trim(),
     repeats: elements.activityRepeats.checked,
@@ -129,6 +230,7 @@ function addActivity(event) {
   clearDraftSubtasks();
   saveState();
   render();
+  elements.activityCategory.value = selectedCategory;
 }
 
 function addDraftSubtask() {
@@ -167,6 +269,7 @@ function updateResetTime(event) {
   saveState();
   render();
   scheduleNextRollover();
+  startResetCountdown();
 }
 
 function refreshForCurrentDay() {
@@ -212,20 +315,27 @@ function handleGlobalClick(event) {
 
   if (event.target.matches(".task-list input")) {
     const task = activity.tasks.find((item) => item.id === event.target.closest("li").dataset.id);
+    const wasDoneForDay = isDoneForDay();
+    const wasComplete = isActivityComplete(activity);
     task.done = event.target.checked;
+    syncActivityCompletion(activity, wasComplete);
     saveState();
     render();
+    playFeedbackTone(isDoneForDay() ? "complete" : "click");
+    if (!wasDoneForDay && isDoneForDay()) celebrateDailyCompletion(false);
   }
 
   if (event.target.matches(".task-list button")) {
+    const wasComplete = isActivityComplete(activity);
     const taskId = event.target.closest("li").dataset.id;
     activity.tasks = activity.tasks.filter((task) => task.id !== taskId);
+    syncActivityCompletion(activity, wasComplete);
     saveState();
     render();
   }
 }
 
-document.addEventListener("submit", (event) => {
+function handleGlobalSubmit(event) {
   const taskForm = event.target.closest(".task-form");
   if (!taskForm) return;
 
@@ -237,11 +347,13 @@ document.addEventListener("submit", (event) => {
 
   if (!activity || !title) return;
 
+  const wasComplete = isActivityComplete(activity);
   activity.tasks.push({ id: makeId(), title, done: false });
+  syncActivityCompletion(activity, wasComplete);
   input.value = "";
   saveState();
   render();
-});
+}
 
 function setActiveTab(tab) {
   document.querySelectorAll(".tab-button").forEach((button) => {
@@ -255,29 +367,53 @@ function setActiveTab(tab) {
 }
 
 function setActivityComplete(activity, completed) {
-  const date = todayKey();
   const wasDoneForDay = isDoneForDay();
-  activity.completedDates = activity.completedDates || [];
+  const wasComplete = isActivityComplete(activity);
 
-  if (completed && !activity.completedDates.includes(date)) {
-    state.activityLabels[activity.id] = activity.title;
-    activity.completedDates.push(date);
-    incrementHistory(activity.id, date);
-    if (!isLastOpenActivity(activity.id)) playFeedbackTone("click");
+  if (activity.tasks.length) {
+    activity.tasks = activity.tasks.map((task) => ({ ...task, done: completed }));
+  } else {
+    setDateCompletion(activity, completed);
   }
 
-  if (!completed) {
-    activity.completedDates = activity.completedDates.filter((item) => item !== date);
-    decrementHistory(activity.id, date);
-    playFeedbackTone("click");
-  }
-
+  syncActivityCompletion(activity, wasComplete);
   saveState();
   render();
 
   if (!wasDoneForDay && isDoneForDay()) {
     celebrateDailyCompletion();
+  } else {
+    playFeedbackTone("click");
   }
+}
+
+function setDateCompletion(activity, completed) {
+  const date = todayKey();
+  activity.completedDates = activity.completedDates || [];
+
+  if (completed && !activity.completedDates.includes(date)) {
+    activity.completedDates.push(date);
+  }
+
+  if (!completed) {
+    activity.completedDates = activity.completedDates.filter((item) => item !== date);
+  }
+}
+
+function syncActivityCompletion(activity, wasComplete) {
+  const date = todayKey();
+  const nowComplete = isActivityComplete(activity);
+
+  if (nowComplete && !activity.completedDates.includes(date)) {
+    activity.completedDates.push(date);
+  }
+
+  if (!nowComplete) {
+    activity.completedDates = activity.completedDates.filter((item) => item !== date);
+  }
+
+  if (nowComplete && !wasComplete) incrementHistory(activity.id, date);
+  if (!nowComplete && wasComplete) decrementHistory(activity.id, date);
 }
 
 function incrementHistory(activityId, date) {
@@ -304,12 +440,29 @@ function render() {
     day: "numeric"
   }).format(dateFromKey(todayKey()));
 
+  renderCategoryOptions();
   renderActivities();
   renderDraftSubtasks();
   renderProgress();
   renderResetSettings();
   renderAnalyticsOptions();
   renderAnalytics();
+}
+
+function renderCategoryOptions() {
+  const selected = elements.activityCategory.value;
+  elements.activityCategory.replaceChildren();
+
+  state.categories.forEach((category) => {
+    const option = document.createElement("option");
+    option.value = category.id;
+    option.textContent = category.title;
+    elements.activityCategory.append(option);
+  });
+
+  if ([...elements.activityCategory.options].some((option) => option.value === selected)) {
+    elements.activityCategory.value = selected;
+  }
 }
 
 function renderDraftSubtasks() {
@@ -335,75 +488,112 @@ function renderResetSettings() {
 function renderActivities() {
   elements.activityList.replaceChildren();
 
-  if (!state.activities.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.textContent = "No activities yet. Add one above and it will show up here for today.";
-    elements.activityList.append(empty);
-    return;
-  }
+  state.categories.forEach((category) => {
+    const activities = state.activities.filter((activity) => activity.categoryId === category.id);
+    const section = document.createElement("section");
+    section.className = "category-section";
+    section.dataset.id = category.id;
 
-  state.activities.forEach((activity) => {
-    const fragment = elements.template.content.cloneNode(true);
-    const card = $(".activity-card", fragment);
-    const isComplete = isCompletedToday(activity);
+    const percent = getCategoryProgressPercent(category.id);
+    section.innerHTML = `
+      <div class="category-header">
+        <div>
+          <p class="eyebrow">Category</p>
+          <h2></h2>
+          <p class="category-summary"></p>
+        </div>
+        <div class="category-progress-wrap">
+          <span class="category-progress-label"></span>
+          <div class="category-meter" aria-hidden="true"><div></div></div>
+        </div>
+      </div>
+      <div class="category-activities"></div>
+    `;
 
-    card.dataset.id = activity.id;
-    card.classList.toggle("completed", isComplete);
-    $(".complete-activity", card).checked = isComplete;
-    $(".activity-check span", card).textContent = isComplete ? "Done today" : "Mark complete";
-    $("h3", card).textContent = activity.title;
-    $(".repeat-label", card).textContent = activity.repeats ? "Repeats every day" : "Only for today";
+    $("h2", section).textContent = category.title;
+    $(".category-summary", section).textContent = `${activities.length} ${activities.length === 1 ? "activity" : "activities"}`;
+    $(".category-progress-label", section).textContent = `${percent}% complete`;
+    $(".category-meter div", section).style.width = `${percent}%`;
 
-    const link = $(".activity-link", card);
-    if (activity.link) {
-      link.href = normalizeUrl(activity.link);
-      link.textContent = activity.link;
+    const list = $(".category-activities", section);
+    if (!activities.length) {
+      const empty = document.createElement("div");
+      empty.className = "category-empty";
+      empty.textContent = "No activities in this category yet.";
+      list.append(empty);
     } else {
-      link.remove();
+      activities.forEach((activity) => list.append(createActivityCard(activity)));
     }
 
-    const taskList = $(".task-list", card);
-    activity.tasks.forEach((task) => {
-      const item = document.createElement("li");
-      item.dataset.id = task.id;
-      item.classList.toggle("done", task.done);
-      item.innerHTML = `
-        <input type="checkbox" aria-label="Toggle subtask">
-        <span></span>
-        <button type="button" aria-label="Delete subtask">x</button>
-      `;
-      $("input", item).checked = task.done;
-      $("span", item).textContent = task.title;
-      taskList.append(item);
-    });
-
-    elements.activityList.append(card);
+    elements.activityList.append(section);
   });
 }
 
+function createActivityCard(activity) {
+  const fragment = elements.template.content.cloneNode(true);
+  const card = $(".activity-card", fragment);
+  const progress = getActivityProgress(activity);
+  const percent = Math.round(progress * 100);
+  const isComplete = progress === 1;
+
+  card.dataset.id = activity.id;
+  card.classList.toggle("completed", isComplete);
+  card.classList.toggle("partial", progress > 0 && progress < 1);
+
+  const checkbox = $(".complete-activity", card);
+  checkbox.checked = isComplete;
+  checkbox.indeterminate = progress > 0 && progress < 1;
+  $(".activity-check span", card).textContent = isComplete ? "Done today" : `${percent}% complete`;
+  $("h3", card).textContent = activity.title;
+  $(".repeat-label", card).textContent = activity.repeats ? "Repeats every day" : "Only for today";
+  $(".activity-progress div", card).style.width = `${percent}%`;
+
+  const link = $(".activity-link", card);
+  if (activity.link) {
+    link.href = normalizeUrl(activity.link);
+    link.textContent = activity.link;
+  } else {
+    link.remove();
+  }
+
+  const taskList = $(".task-list", card);
+  activity.tasks.forEach((task) => {
+    const item = document.createElement("li");
+    item.dataset.id = task.id;
+    item.classList.toggle("done", task.done);
+    item.innerHTML = `
+      <input type="checkbox" aria-label="Toggle subtask">
+      <span></span>
+      <button type="button" aria-label="Delete subtask">x</button>
+    `;
+    $("input", item).checked = task.done;
+    $("span", item).textContent = task.title;
+    taskList.append(item);
+  });
+
+  return card;
+}
+
 function renderProgress() {
-  const total = state.activities.length;
-  const complete = state.activities.filter(isCompletedToday).length;
-  const percent = total ? Math.round((complete / total) * 100) : 0;
+  const snapshot = getDailyProgressSnapshot();
   const activeStreak = getActiveStreak("all");
   const bestStreak = getBestStreak(getRecentDates(365), "all");
-  const dayIsDone = total > 0 && complete === total;
+  const dayIsDone = snapshot.total > 0 && snapshot.percent === 100;
 
-  elements.progressTitle.textContent = `${complete} of ${total} complete`;
-  elements.progressRing.dataset.label = `${percent}%`;
-  elements.progressRing.style.background = `conic-gradient(var(--accent) ${percent * 3.6}deg, var(--soft) 0deg)`;
-  elements.progressBar.style.width = `${percent}%`;
+  elements.progressTitle.textContent = `${snapshot.percent}% complete`;
+  elements.progressRing.dataset.label = `${snapshot.percent}%`;
+  elements.progressRing.style.background = `conic-gradient(var(--accent) ${snapshot.percent * 3.6}deg, var(--soft) 0deg)`;
+  elements.progressBar.style.width = `${snapshot.percent}%`;
   elements.homeCurrentStreak.textContent = formatDayCount(activeStreak.days);
   elements.homeBestStreak.textContent = formatDayCount(bestStreak);
   renderResetCountdown();
   elements.streakNote.textContent = getStreakNote(activeStreak);
   elements.dashboardPanel.classList.toggle("all-done", dayIsDone);
   elements.dailyNote.classList.toggle("done-message", dayIsDone);
-  elements.dailyNote.textContent = total
-    ? complete === total
+  elements.dailyNote.textContent = snapshot.total
+    ? dayIsDone
       ? "Done for today. Everything is checked off."
-      : `${total - complete} ${total - complete === 1 ? "activity" : "activities"} still open today.`
+      : `${snapshot.remaining} ${snapshot.remaining === 1 ? "activity" : "activities"} still open today.`
     : "Add an activity to start shaping the day.";
 }
 
@@ -413,17 +603,21 @@ function renderAnalyticsOptions() {
 
   const all = document.createElement("option");
   all.value = "all";
-  all.textContent = "All activities";
+  all.textContent = "All categories";
   elements.analyticsActivity.append(all);
 
-  const activeLabels = Object.fromEntries(state.activities.map((activity) => [activity.id, activity.title]));
-  const labels = { ...state.activityLabels, ...activeLabels };
-  const ids = [...new Set([...Object.keys(labels), ...Object.keys(state.history)])];
-
-  ids.forEach((id) => {
+  state.categories.forEach((category) => {
     const option = document.createElement("option");
-    option.value = id;
-    option.textContent = labels[id] || "Archived activity";
+    option.value = `category:${category.id}`;
+    option.textContent = category.title;
+    elements.analyticsActivity.append(option);
+  });
+
+  state.activities.forEach((activity) => {
+    const option = document.createElement("option");
+    const category = getCategory(activity.categoryId);
+    option.value = `activity:${activity.id}`;
+    option.textContent = `${category?.title || "Category"} / ${activity.title}`;
     elements.analyticsActivity.append(option);
   });
 
@@ -436,17 +630,17 @@ function renderAnalytics() {
   const days = Number(elements.analyticsRange.value || 7);
   const dates = getRecentDates(days);
   const selected = elements.analyticsActivity.value || "all";
-  const data = dates.map((date) => countForDate(date, selected));
+  const data = dates.map((date) => progressForDate(date, selected));
 
   drawChart(dates, data);
   renderStats(dates, data, selected);
 }
 
 function renderStats(dates, data, selected) {
-  const total = data.reduce((sum, value) => sum + value, 0);
-  elements.totalCompletions.textContent = total;
-  elements.bestStreak.textContent = `${getBestStreak(dates, selected)} days`;
-  elements.currentStreak.textContent = `${getCurrentStreak(selected)} days`;
+  const average = data.length ? Math.round(data.reduce((sum, value) => sum + value, 0) / data.length) : 0;
+  elements.totalCompletions.textContent = `${average}%`;
+  elements.bestStreak.textContent = formatDayCount(getBestStreak(dates, selected));
+  elements.currentStreak.textContent = formatDayCount(getCurrentStreak(selected));
 }
 
 function drawChart(dates, data) {
@@ -454,6 +648,8 @@ function drawChart(dates, data) {
   const ctx = canvas.getContext("2d");
   const ratio = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
+
+  if (!rect.width || !rect.height) return;
 
   canvas.width = rect.width * ratio;
   canvas.height = rect.height * ratio;
@@ -463,7 +659,6 @@ function drawChart(dates, data) {
   const padding = { top: 24, right: 18, bottom: 44, left: 42 };
   const chartWidth = rect.width - padding.left - padding.right;
   const chartHeight = rect.height - padding.top - padding.bottom;
-  const max = Math.max(1, ...data);
   const slotWidth = chartWidth / data.length;
   const barWidth = Math.max(2, slotWidth * 0.72);
 
@@ -472,18 +667,18 @@ function drawChart(dates, data) {
   ctx.fillStyle = "#68736c";
   ctx.font = "12px Inter, system-ui, sans-serif";
 
-  for (let i = 0; i <= max; i += Math.max(1, Math.ceil(max / 4))) {
-    const y = padding.top + chartHeight - (i / max) * chartHeight;
+  [0, 25, 50, 75, 100].forEach((value) => {
+    const y = padding.top + chartHeight - (value / 100) * chartHeight;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(rect.width - padding.right, y);
     ctx.stroke();
-    ctx.fillText(String(i), 12, y + 4);
-  }
+    ctx.fillText(`${value}%`, 8, y + 4);
+  });
 
   data.forEach((value, index) => {
     const x = padding.left + index * slotWidth + (slotWidth - barWidth) / 2;
-    const height = (value / max) * chartHeight;
+    const height = (value / 100) * chartHeight;
     const y = padding.top + chartHeight - height;
 
     ctx.fillStyle = value ? "#256d5a" : "#dce3dc";
@@ -505,30 +700,89 @@ function drawChart(dates, data) {
     ctx.fillStyle = "#68736c";
     ctx.textAlign = "center";
     ctx.font = "15px Inter, system-ui, sans-serif";
-    ctx.fillText("No completions yet for this range.", rect.width / 2, rect.height / 2);
+    ctx.fillText("No progress yet for this range.", rect.width / 2, rect.height / 2);
   }
 }
 
-function roundRect(ctx, x, y, width, height, radius) {
-  const safeRadius = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + safeRadius, y);
-  ctx.lineTo(x + width - safeRadius, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
-  ctx.lineTo(x + width, y + height - safeRadius);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
-  ctx.lineTo(x + safeRadius, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
-  ctx.lineTo(x, y + safeRadius);
-  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+function getDailyProgressSnapshot() {
+  const activities = state.activities;
+  const categoryProgress = Object.fromEntries(
+    state.categories.map((category) => [category.id, getCategoryProgressPercent(category.id)])
+  );
+  const activityProgress = Object.fromEntries(
+    activities.map((activity) => [activity.id, Math.round(getActivityProgress(activity) * 100)])
+  );
+  const percent = getOverallProgressPercent();
+  const completed = activities.filter(isActivityComplete).length;
+
+  return {
+    percent,
+    completed,
+    total: activities.length,
+    remaining: activities.length - completed,
+    categories: categoryProgress,
+    activities: activityProgress
+  };
 }
 
-function countForDate(date, selected) {
-  if (selected !== "all") return state.history[selected]?.[date] || 0;
+function getOverallProgressPercent() {
+  if (!state.activities.length) return 0;
+  const total = state.activities.reduce((sum, activity) => sum + getActivityProgress(activity), 0);
+  return Math.round((total / state.activities.length) * 100);
+}
 
-  return Object.values(state.history).reduce((sum, activityHistory) => {
-    return sum + (activityHistory[date] || 0);
-  }, 0);
+function getCategoryProgressPercent(categoryId) {
+  const activities = state.activities.filter((activity) => activity.categoryId === categoryId);
+  if (!activities.length) return 0;
+  const total = activities.reduce((sum, activity) => sum + getActivityProgress(activity), 0);
+  return Math.round((total / activities.length) * 100);
+}
+
+function getActivityProgress(activity) {
+  if (activity.tasks.length) {
+    return activity.tasks.filter((task) => task.done).length / activity.tasks.length;
+  }
+
+  return isCompletedByDate(activity, todayKey()) ? 1 : 0;
+}
+
+function isActivityComplete(activity) {
+  return getActivityProgress(activity) === 1;
+}
+
+function isCompletedByDate(activity, date) {
+  return (activity.completedDates || []).includes(date);
+}
+
+function isDoneForDay() {
+  return state.activities.length > 0 && getOverallProgressPercent() === 100;
+}
+
+function progressForDate(date, selected) {
+  const snapshot = state.dailyProgress?.[date];
+  if (selected === "all") return snapshot?.percent ?? legacyOverallProgress(date);
+
+  const [type, id] = selected.split(":");
+  if (type === "category") return snapshot?.categories?.[id] ?? legacyCategoryProgress(id, date);
+  if (type === "activity") return snapshot?.activities?.[id] ?? legacyActivityProgress(id, date);
+  return 0;
+}
+
+function legacyActivityProgress(activityId, date) {
+  return state.history[activityId]?.[date] > 0 ? 100 : 0;
+}
+
+function legacyCategoryProgress(categoryId, date) {
+  const activities = state.activities.filter((activity) => activity.categoryId === categoryId);
+  if (!activities.length) return 0;
+  const total = activities.reduce((sum, activity) => sum + legacyActivityProgress(activity.id, date), 0);
+  return Math.round(total / activities.length);
+}
+
+function legacyOverallProgress(date) {
+  if (!state.activities.length) return 0;
+  const total = state.activities.reduce((sum, activity) => sum + legacyActivityProgress(activity.id, date), 0);
+  return Math.round(total / state.activities.length);
 }
 
 function getBestStreak(dates, selected) {
@@ -536,7 +790,7 @@ function getBestStreak(dates, selected) {
   let current = 0;
 
   dates.forEach((date) => {
-    if (countForDate(date, selected) > 0) {
+    if (progressForDate(date, selected) >= 100) {
       current += 1;
       best = Math.max(best, current);
     } else {
@@ -554,7 +808,7 @@ function getCurrentStreak(selected) {
   for (let offset = 0; offset < 365; offset += 1) {
     const date = new Date(currentDay);
     date.setDate(currentDay.getDate() - offset);
-    if (countForDate(toDateKey(date), selected) === 0) break;
+    if (progressForDate(toDateKey(date), selected) < 100) break;
     streak += 1;
   }
 
@@ -563,17 +817,35 @@ function getCurrentStreak(selected) {
 
 function getActiveStreak(selected) {
   const currentDay = dateFromKey(todayKey());
-  const hasToday = countForDate(toDateKey(currentDay), selected) > 0;
+  const hasToday = progressForDate(toDateKey(currentDay), selected) >= 100;
   let streak = 0;
 
   for (let offset = hasToday ? 0 : 1; offset < 365; offset += 1) {
     const date = new Date(currentDay);
     date.setDate(currentDay.getDate() - offset);
-    if (countForDate(toDateKey(date), selected) === 0) break;
+    if (progressForDate(toDateKey(date), selected) < 100) break;
     streak += 1;
   }
 
   return { days: streak, hasToday };
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + safeRadius, y);
+  ctx.lineTo(x + width - safeRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  ctx.lineTo(x + width, y + height - safeRadius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  ctx.lineTo(x + safeRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  ctx.lineTo(x, y + safeRadius);
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+}
+
+function getCategory(categoryId) {
+  return state.categories.find((category) => category.id === categoryId);
 }
 
 function getRecentDates(days) {
@@ -668,23 +940,9 @@ function formatTimeLeft(milliseconds) {
 }
 
 function getStreakNote(streak) {
-  if (streak.hasToday) return "Active today";
-  if (streak.days > 0) return "Complete one today";
-  return "Complete one to start";
-}
-
-function isCompletedToday(activity) {
-  return (activity.completedDates || []).includes(todayKey());
-}
-
-function isDoneForDay() {
-  return state.activities.length > 0 && state.activities.every(isCompletedToday);
-}
-
-function isLastOpenActivity(activityId) {
-  return state.activities
-    .filter((activity) => activity.id !== activityId)
-    .every(isCompletedToday);
+  if (streak.hasToday) return "Complete today";
+  if (streak.days > 0) return "Finish today";
+  return "Reach 100% to start";
 }
 
 function normalizeUrl(url) {
@@ -692,29 +950,14 @@ function normalizeUrl(url) {
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
 }
 
-window.addEventListener("resize", () => {
-  if ($("#analyticsView").classList.contains("active")) renderAnalytics();
-});
-
-if ("serviceWorker" in navigator && location.protocol !== "file:") {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
-  });
-}
-
-document.addEventListener("pointerdown", (event) => {
-  const button = event.target.closest("button");
-  if (button) triggerButtonFeedback(button);
-});
-
 function triggerButtonFeedback(button) {
   button.classList.remove("clicked");
   window.requestAnimationFrame(() => button.classList.add("clicked"));
   window.setTimeout(() => button.classList.remove("clicked"), 260);
 }
 
-function celebrateDailyCompletion() {
-  playFeedbackTone("complete");
+function celebrateDailyCompletion(playTone = true) {
+  if (playTone) playFeedbackTone("complete");
   elements.dashboardPanel.classList.add("celebrating");
   window.setTimeout(() => elements.dashboardPanel.classList.remove("celebrating"), 1000);
 
@@ -765,4 +1008,10 @@ function playTone(context, frequency, delay, duration) {
   oscillator.connect(gain).connect(context.destination);
   oscillator.start(start);
   oscillator.stop(end + 0.02);
+}
+
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  });
 }

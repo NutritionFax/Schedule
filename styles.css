@@ -159,7 +159,7 @@ h3 {
 
 .activity-form {
   display: grid;
-  gap: 14px;
+  gap: 15px;
   padding: 18px;
 }
 
@@ -213,6 +213,7 @@ select:focus {
 }
 
 .primary-button,
+.secondary-button,
 .task-form button,
 .subtask-input-row button {
   min-height: 44px;
@@ -223,17 +224,35 @@ select:focus {
   font-weight: 900;
 }
 
+.secondary-button {
+  border: 1px solid var(--line);
+  background: #eef4f0;
+  color: var(--accent);
+}
+
 .primary-button:hover,
+.secondary-button:hover,
 .task-form button:hover,
 .subtask-input-row button:hover {
   background: #1d5845;
+  color: #fff;
 }
 
 .primary-button.clicked,
+.secondary-button.clicked,
 .task-form button.clicked,
 .subtask-input-row button.clicked {
   background: #174a3a;
   box-shadow: 0 0 0 4px rgba(35, 104, 81, 0.16);
+}
+
+.category-builder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 15px;
 }
 
 .subtask-input-row {
@@ -413,7 +432,75 @@ select:focus {
 
 .activity-list {
   display: grid;
+  gap: 22px;
+}
+
+.category-section {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.category-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
   gap: 14px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.category-header h2 {
+  overflow-wrap: anywhere;
+}
+
+.category-summary {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 750;
+  margin-top: 4px;
+}
+
+.category-progress-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.category-progress-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-align: right;
+}
+
+.category-meter,
+.activity-progress {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: #e7ede8;
+}
+
+.category-meter div,
+.activity-progress div {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-3));
+  transition: width 180ms ease;
+}
+
+.category-activities {
+  display: grid;
+  gap: 14px;
+}
+
+.category-empty {
+  border: 1px dashed #b9c5bd;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  padding: 16px;
 }
 
 .activity-card {
@@ -431,6 +518,11 @@ select:focus {
   border-color: rgba(37, 109, 90, 0.45);
   background: #f7fbf9;
   box-shadow: 0 10px 28px rgba(35, 104, 81, 0.12);
+}
+
+.activity-card.partial {
+  border-color: rgba(49, 95, 150, 0.35);
+  background: #fbfdff;
 }
 
 .activity-card-main {
@@ -721,6 +813,15 @@ canvas {
 
   .dashboard-stats {
     grid-template-columns: 1fr;
+  }
+
+  .category-builder,
+  .category-header {
+    grid-template-columns: 1fr;
+  }
+
+  .category-progress-label {
+    text-align: left;
   }
 
   .subtask-input-row {

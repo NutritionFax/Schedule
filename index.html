@@ -30,7 +30,18 @@
       <section class="view active" id="todayView" aria-labelledby="todayTab">
         <div class="today-grid">
           <form class="activity-form" id="activityForm">
+            <div class="category-builder">
+              <label>
+                <span>New category</span>
+                <input id="categoryTitle" type="text" placeholder="Physical, learning, home..." aria-label="New category">
+              </label>
+              <button id="addCategory" class="secondary-button" type="button">Add category</button>
+            </div>
             <h2>Add Activity</h2>
+            <label>
+              <span>Category</span>
+              <select id="activityCategory"></select>
+            </label>
             <label>
               <span>Activity</span>
               <input id="activityTitle" name="title" type="text" placeholder="Deep work, workout, reading..." required>
@@ -104,7 +115,7 @@
           </div>
           <div class="control-row">
             <label>
-              <span>Activity</span>
+              <span>Scope</span>
               <select id="analyticsActivity"></select>
             </label>
             <label>
@@ -125,7 +136,7 @@
 
           <section class="stats-grid" aria-label="Progress statistics">
             <article>
-              <span>Total completions</span>
+              <span>Average progress</span>
               <strong id="totalCompletions">0</strong>
             </article>
             <article>
@@ -157,6 +168,9 @@
         <div class="activity-actions">
           <button class="icon-button add-task" type="button" title="Add subtask" aria-label="Add subtask">+</button>
           <button class="icon-button delete-activity" type="button" title="Delete activity" aria-label="Delete activity">x</button>
+        </div>
+        <div class="activity-progress" aria-hidden="true">
+          <div></div>
         </div>
         <form class="task-form">
           <input type="text" placeholder="New subtask" aria-label="New subtask">
